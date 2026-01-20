@@ -54,11 +54,12 @@
     <div id="results"></div>
 
     <script>
-        // YOUR KEYS
+        // YOUR API KEYS
         const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
         
         // 1. HELPER: Convert "City Name" -> "Lat/Lon" (OpenStreetMap)
         async function getGeo(city) {
+            // Using OSM for free geocoding
             const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`;
             const res = await fetch(url);
             const data = await res.json();
@@ -93,8 +94,8 @@
                 const rawCities = cityText.split(',').map(s => s.trim()).filter(s => s);
                 const viewerInput = document.getElementById('viewerZone').value;
                 
-                // Step B: Resolve Viewer Zone (Simple Logic)
-                // We do a quick lookup for the viewer too, just in case they typed "NYC"
+                // Step B: Resolve Viewer Zone
+                // (We do a quick lookup for the viewer too, just in case they typed "NYC")
                 let viewerZoneID = "UTC";
                 try {
                     const vGeo = await getGeo(viewerInput);
@@ -109,9 +110,7 @@
                 
                 for (const city of rawCities) {
                     try {
-                        // 1. Get Lat/Lon
                         const geo = await getGeo(city);
-                        // 2. Get Timezone
                         const tz = await getTimezone(geo.lat, geo.lon);
                         
                         validTimezones.push(tz);
@@ -143,16 +142,25 @@
 
                 const data = await req.json();
 
+                // --- 🛑 CRITICAL FIX FOR "UNDEFINED LENGTH" ---
+                // We must check if the API returned an error BEFORE reading .top_3
+                if (!req.ok || data.error) {
+                    throw new Error(data.error || "Unknown API Error");
+                }
+
                 // Step E: Display Results
                 let output = `⚡ BEST MATCHES (Viewer Time: ${viewerZoneID}):\n\n`;
                 
-                if (data.top_3.length === 0) {
+                // Safely default to [] if top_3 is missing
+                const results = data.top_3 || [];
+
+                if (results.length === 0) {
                     output += "⚠️ No viable times found (Everything is Red/Impossible).\n";
                 }
 
-                data.top_3.forEach((slot, i) => {
-                    output += `#${i+1} [ ${slot.display_time} ]  Score: ${slot.score} (${slot.status})\n`;
-                    if(slot.blockers.length) {
+                results.forEach((slot, i) => {
+                    output += `#${i+1} [ ${slot.display_time} ]  Score: ${slot.score}\n`;
+                    if(slot.blockers && slot.blockers.length > 0) {
                         slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
                     } else {
                         output += `   ✨ Perfect Match\n`;
