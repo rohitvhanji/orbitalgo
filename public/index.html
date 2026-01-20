@@ -3,80 +3,178 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit Universal Engine</title>
+    <title>Orbit | Intelligent Global Scheduling</title>
     <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f4f5; }
-        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.8rem; text-transform: uppercase; color: #64748b; }
-        input, textarea, select { width: 100%; padding: 12px; border: 1px solid #e4e4e7; border-radius: 6px; margin-bottom: 15px; font-size: 1rem; }
-        .row { display: flex; gap: 15px; }
-        .col { flex: 1; }
-        button { background: #000; color: #fff; width: 100%; padding: 15px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
-        #results { background: #18181b; color: #10b981; padding: 20px; border-radius: 8px; font-family: monospace; white-space: pre-wrap; display: none; }
-        .badge { display: inline-block; padding: 4px 8px; background: #eff6ff; color: #2563eb; border-radius: 4px; font-size: 0.7rem; font-weight: bold; margin-bottom: 10px; }
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --border: #e2e8f0;
+        }
+
+        body { 
+            font-family: -apple-system, system-ui, sans-serif; 
+            max-width: 900px; margin: 40px auto; padding: 20px; 
+            background: var(--bg); color: var(--text); line-height: 1.5;
+        }
+
+        .card { 
+            background: var(--card); padding: 30px; border-radius: 16px; 
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        .badge { 
+            display: inline-block; padding: 4px 12px; background: #dbeafe; 
+            color: #1e40af; border-radius: 20px; font-size: 0.7rem; 
+            font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+            margin-bottom: 16px;
+        }
+
+        h1 { font-size: 1.8rem; margin: 0 0 24px 0; letter-spacing: -0.02em; }
+
+        .section-label { 
+            display: block; font-weight: 700; margin-bottom: 12px; 
+            font-size: 0.85rem; color: #64748b; border-bottom: 1px solid var(--border);
+            padding-bottom: 8px; margin-top: 20px;
+        }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px; }
+
+        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; }
+
+        input, textarea, select { 
+            width: 100%; padding: 12px; border: 1px solid var(--border); 
+            border-radius: 8px; font-size: 0.95rem; box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, select:focus { outline: none; border-color: var(--primary); }
+
+        .policy-box {
+            background: #f1f5f9; padding: 20px; border-radius: 12px; margin: 20px 0;
+        }
+
+        button { 
+            background: #0f172a; color: white; width: 100%; padding: 16px; 
+            border: none; border-radius: 8px; font-weight: 700; font-size: 1rem;
+            cursor: pointer; transition: transform 0.1s, opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:active { transform: scale(0.98); }
+
+        #results { 
+            background: #0f172a; color: #f8fafc; padding: 25px; 
+            border-radius: 12px; font-family: 'Menlo', 'Monaco', monospace; 
+            white-space: pre-wrap; display: none; overflow-x: auto;
+            border: 1px solid #334155; line-height: 1.6;
+        }
+
+        .res-header { color: #38bdf8; font-weight: bold; margin-bottom: 15px; display: block; border-bottom: 1px dashed #334155; padding-bottom: 10px;}
+        .slot-card { margin-bottom: 20px; padding-left: 15px; border-left: 3px solid #10b981; }
+        .blocker { color: #fb7185; }
+        .score-box { color: #94a3b8; font-size: 0.85rem; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <div class="badge">ORBIT ENGINE v2.0</div>
-        <h1>Meeting Intelligence</h1>
+        <div class="badge">Orbit Intelligence Engine</div>
+        <h1>Schedule Global Meetings</h1>
 
-        <div class="row">
+        <div class="grid">
             <div class="col">
-                <label>Date</label>
-                <input type="date" id="dateInput" value="2024-05-20">
+                <label>Meeting Date</label>
+                <input type="date" id="dateInput">
             </div>
             <div class="col">
-                <label>Meeting Culture (Weight Profile)</label>
-                <select id="profileInput">
-                    <option value="balanced">⚖ Balanced (Fairness First)</option>
-                    <option value="efficiency">⚡ Efficiency (Majority Rules)</option>
-                    <option value="human">🧘 Human-First (No One Suffers)</option>
-                </select>
+                <label>Host/Organizer City</label>
+                <input type="text" id="hostInput" placeholder="e.g. New York">
             </div>
         </div>
 
-        <div class="row">
-            <div class="col">
-                <label>Host City</label>
-                <input type="text" id="hostInput" value="New York">
-            </div>
-            <div class="col">
-                <label>Host Mode</label>
-                <select id="hostModeInput">
-                    <option value="strict">Strict (9-5)</option>
-                    <option value="flexible">Peer (Flexible)</option>
-                </select>
+        <label class="section-label">Meeting Policy (Personality)</label>
+        <div class="policy-box">
+            <div class="grid">
+                <div class="col">
+                    <label>Host Flexibility (Veto)</label>
+                    <select id="hostModeInput">
+                        <option value="strict">Strict (Organizer must be 9-5)</option>
+                        <option value="flexible" selected>Flexible (Organizer Peer Mode)</option>
+                    </select>
+                </div>
+                <div class="col">
+                    <label>Team Priority (Weight)</label>
+                    <select id="profileInput">
+                        <option value="balanced" selected>⚖️ Balanced (Recommended)</option>
+                        <option value="efficiency">⚡ Efficiency (Majority Rules)</option>
+                        <option value="human">🧘 Human-First (Protect Individual)</option>
+                    </select>
+                </div>
             </div>
         </div>
 
-        <label>Team Cities (Comma Separated)</label>
-        <textarea id="cityInput">London, Tokyo, Bengaluru</textarea>
+        <label>Team Member Cities</label>
+        <textarea id="cityInput" placeholder="Enter cities separated by commas (e.g. London, Tokyo, Bengaluru)">London, Tokyo, Bengaluru</textarea>
 
-        <button onclick="run()">Find Optimal Times</button>
+        <button onclick="runOptimization()" id="mainBtn">Calculate Optimal Times</button>
     </div>
 
     <div id="results"></div>
 
     <script>
-        async function run() {
+        // Set default date to today
+        document.getElementById('dateInput').valueAsDate = new Date();
+
+        // Helper to map UI settings to your Labels
+        function getStrategyLabel(host, profile) {
+            const matrix = {
+                'flexible-balanced': 'Recommended (Fairness + Feasibility)',
+                'strict-balanced': 'Manager Mode (Protects Organizer)',
+                'flexible-efficiency': 'Fast Scheduling (Majority Availability)',
+                'strict-efficiency': 'Host First (Max Convenience)',
+                'flexible-human': 'People First (Avoids Disruption)',
+                'strict-human': 'High Standards (Strict Perfection)'
+            };
+            return matrix[`${host}-${profile}`] || 'Standard Optimization';
+        }
+
+        async function runOptimization() {
             const resDiv = document.getElementById('results');
+            const btn = document.getElementById('mainBtn');
+            
             resDiv.style.display = 'block';
-            resDiv.innerText = "Processing...";
+            resDiv.innerHTML = "Initializing Orbit Engine...\nResolving timezones and calculating fairness scores...";
+            btn.disabled = true;
 
             try {
-                // 1. Resolve Host
-                const hRes = await fetch('/api/resolve', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: document.getElementById('hostInput').value }) });
+                const hostCity = document.getElementById('hostInput').value;
+                const teamCities = document.getElementById('cityInput').value.split(',').map(c => c.trim()).filter(c => c);
+                const hostMode = document.getElementById('hostModeInput').value;
+                const profile = document.getElementById('profileInput').value;
+                const date = document.getElementById('dateInput').value;
+
+                // 1. Resolve Host TZ
+                const hRes = await fetch('/api/resolve', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ city: hostCity }) 
+                });
                 const hData = await hRes.json();
-                
-                // 2. Resolve Team
-                const cities = document.getElementById('cityInput').value.split(',').map(s => s.trim());
+                if(!hData.timezone_id) throw new Error("Could not resolve Host City");
+
+                // 2. Resolve Team TZs
                 const teamIDs = [hData.timezone_id];
-                for (let c of cities) {
-                    const r = await fetch('/api/resolve', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: c }) });
+                for (let city of teamCities) {
+                    const r = await fetch('/api/resolve', { 
+                        method: 'POST', 
+                        headers: {'Content-Type': 'application/json'}, 
+                        body: JSON.stringify({ city }) 
+                    });
                     const d = await r.json();
-                    teamIDs.push(d.timezone_id);
+                    if(d.timezone_id) teamIDs.push(d.timezone_id);
                 }
 
                 // 3. Optimize
@@ -84,25 +182,44 @@
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        date: document.getElementById('dateInput').value,
+                        date: date,
                         timezones: [...new Set(teamIDs)],
                         optimize_for: hData.timezone_id,
-                        host_mode: document.getElementById('hostModeInput').value,
-                        profile: document.getElementById('profileInput').value
+                        host_mode: hostMode,
+                        profile: profile
                     })
                 });
                 const oData = await oRes.json();
 
-                let out = `MODE: ${oData.profile.toUpperCase()} (Weight: ${oData.weight_used})\n\n`;
-                oData.top_3.forEach((s, i) => {
-                    out += `#${i+1} [ ${s.display_time} ] Fairness Score: ${s.fairness_score}\n`;
-                    out += `   Happiness: ${s.happiness_score} | Penalty: -${s.conflict_penalty}\n`;
-                    s.blockers.forEach(b => out += `   ⚠️ ${b}\n`);
-                    out += `\n`;
-                });
-                resDiv.innerText = out;
-            } catch (e) {
-                resDiv.innerText = "Error: " + e.message;
+                // 4. Render Beautifully
+                const strategy = getStrategyLabel(hostMode, profile);
+                let html = `<span class="res-header">STRATEGY: ${strategy}</span>\n\n`;
+                
+                if (oData.top_3.length === 0) {
+                    html += "❌ No viable times found for this policy combination.\nTry changing 'Strict' to 'Flexible'.";
+                } else {
+                    oData.top_3.forEach((slot, i) => {
+                        html += `<div class="slot-card">`;
+                        html += `<b>#${i+1} TOP PICK: ${slot.display_time}</b>\n`;
+                        html += `<span class="score-box">Fairness Score: ${Math.round(slot.fairness_score)} (Happiness: ${slot.happiness_score} | Penalty: -${slot.conflict_penalty})</span>\n`;
+                        
+                        if (slot.blockers && slot.blockers.length > 0) {
+                            slot.blockers.forEach(b => {
+                                html += `  <span class="blocker">⚠️ ${b}</span>\n`;
+                            });
+                        } else {
+                            html += `  <span style="color:#10b981">✨ Zero Conflicts</span>\n`;
+                        }
+                        html += `</div>`;
+                    });
+                }
+
+                resDiv.innerHTML = html;
+
+            } catch (err) {
+                resDiv.innerHTML = `<span style="color:#fb7185">ERROR: ${err.message}</span>`;
+            } finally {
+                btn.disabled = false;
             }
         }
     </script>
