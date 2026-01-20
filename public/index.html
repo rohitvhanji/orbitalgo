@@ -9,12 +9,15 @@
         .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 20px; }
         h1 { margin-top: 0; font-size: 1.5rem; }
         label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
-        input, textarea { width: 100%; padding: 10px; border: 1px solid #e4e4e7; border-radius: 6px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px; box-sizing: border-box; }
-        textarea { height: 200px; }
+        input, textarea, select { width: 100%; padding: 10px; border: 1px solid #e4e4e7; border-radius: 6px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px; box-sizing: border-box; }
+        textarea { height: 150px; }
         button { background: #000; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; }
         button:hover { opacity: 0.8; }
         #results { white-space: pre-wrap; background: #18181b; color: #00ff9d; padding: 20px; border-radius: 8px; font-family: monospace; overflow-x: auto; display: none; }
         .tag { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 15px; }
+        .status-green { color: #4ade80; }
+        .status-yellow { color: #facc15; }
+        .status-red { color: #f87171; }
     </style>
 </head>
 <body>
@@ -22,29 +25,28 @@
     <div class="card">
         <span class="tag">ALGORITHM TESTER</span>
         <h1>Orbit Intelligence Engine</h1>
-        <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">Modify the JSON below to test different team configurations and weights.</p>
+        <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">
+            Test the new Timezone-based API.
+        </p>
         
-        <label>Target Date (YYYY-MM-DD)</label>
-        <input type="date" id="dateInput" value="2023-11-01">
+        <div style="display:flex; gap:10px;">
+            <div style="flex:1">
+                <label>Target Date</label>
+                <input type="date" id="dateInput" value="2023-11-01">
+            </div>
+            <div style="flex:1">
+                <label>View Results In (Timezone)</label>
+                <input type="text" id="viewerZone" value="America/New_York" placeholder="e.g. Asia/Kolkata">
+            </div>
+        </div>
 
-        <label>Team Payload (JSON)</label>
+        <label>Timezones List (JSON Array)</label>
         <textarea id="jsonInput">
 [
-  { 
-    "name": "Ravi (India)", 
-    "offset": 5.5, 
-    "prefs": [] 
-  },
-  { 
-    "name": "Sarah (NYC)", 
-    "offset": -4, 
-    "prefs": [] 
-  },
-  { 
-    "name": "Chen (SF)", 
-    "offset": -7, 
-    "prefs": ["night_owl"] 
-  }
+  "Asia/Kolkata",
+  "America/New_York",
+  "Europe/London",
+  "Asia/Tokyo"
 ]</textarea>
         <button onclick="testEngine()" id="btn">Run Simulation</button>
     </div>
@@ -60,15 +62,15 @@
                 btn.innerText = "Running...";
                 resBox.style.display = 'none';
 
+                // 1. Construct the Payload (Matching the new API signature)
                 const payload = {
                     date: document.getElementById('dateInput').value,
-                    team: JSON.parse(document.getElementById('jsonInput').value)
+                    timezones: JSON.parse(document.getElementById('jsonInput').value),
+                    optimize_for: document.getElementById('viewerZone').value
                 };
 
-                // Determine URL (Local vs Vercel)
-                const apiUrl = window.location.hostname === 'localhost' 
-                    ? '/api/optimize' 
-                    : '/api/optimize'; 
+                // 2. Call the API
+                const apiUrl = '/api/optimize'; 
 
                 const req = await fetch(apiUrl, {
                     method: 'POST',
@@ -77,12 +79,22 @@
                 });
 
                 const data = await req.json();
+
+                if (!req.ok) {
+                    throw new Error(data.error || "API Error");
+                }
                 
-                // Format output nicely
-                let output = `⚡ BEST MATCHES FOUND:\n\n`;
+                // 3. Render Output
+                let output = `⚡ BEST MATCHES (Viewer Time: ${payload.optimize_for}):\n\n`;
+                
+                if (data.top_3.length === 0) {
+                    output += "⚠️ No viable times found (Everything is Red/Impossible).\n";
+                }
+
                 data.top_3.forEach((slot, i) => {
-                    const time = new Date(slot.utc).toISOString().split('T')[1].slice(0,5);
-                    output += `#${i+1} [${time} UTC] (Score: ${slot.score})\n`;
+                    // Use the pre-calculated 'display_time' from the server
+                    output += `#${i+1} [ ${slot.display_time} ]  Score: ${slot.score}\n`;
+                    
                     if(slot.blockers.length) {
                         slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
                     } else {
@@ -98,7 +110,9 @@
                 resBox.style.display = 'block';
 
             } catch (err) {
-                alert("Error: " + err.message);
+                resBox.innerText = "❌ ERROR:\n" + err.message;
+                resBox.style.display = 'block';
+                resBox.style.color = '#f87171'; // Red text for error
             } finally {
                 btn.innerText = "Run Simulation";
             }
