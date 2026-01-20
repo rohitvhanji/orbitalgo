@@ -1,4 +1,3 @@
-// new chage
 const express = require('express');
 const cors = require('cors');
 const app = express();
@@ -38,14 +37,16 @@ const POLICIES = {
 
 function getOffsetInHours(timeZone, dateStr) {
     try {
+        // Fix spaces to underscores just in case (e.g. "New York" -> "New_York")
+        const safeZone = timeZone.replace(/\s/g, '_');
         const date = new Date(dateStr + "T12:00:00Z");
-        const format = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" });
+        const format = new Intl.DateTimeFormat("en-US", { timeZone: safeZone, timeZoneName: "shortOffset" });
         const parts = format.formatToParts(date);
         const val = parts.find(p => p.type === "timeZoneName").value.replace("GMT", "").replace("UTC", "");
         if (!val) return 0;
         const [h, m] = val.split(":").map(Number);
         return h + (h < 0 ? -(m / 60 || 0) : (m / 60 || 0));
-    } catch (e) { return null; }
+    } catch (e) { return 0; }
 }
 
 function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, viewerZone, policy) {
@@ -53,13 +54,14 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
     const hostTime = (dateObj.getUTCHours() + hostOffset + 24) % 24;
     
     const timeFormatter = (zone) => new Intl.DateTimeFormat("en-US", { 
-        timeZone: zone, hour: 'numeric', minute: '2-digit', hour12: true 
+        timeZone: zone.replace(/\s/g, '_'), hour: 'numeric', minute: '2-digit', hour12: true 
     });
 
     // --- HOST VETO LOGIC ---
     const hostDateLocal = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDateLocal.getUTCDay();
     
+    // Weekend check
     if (hostDay === 0 || hostDay === 6) {
         return { host_time: timeFormatter(hostZone).format(dateObj), total_score: -999, status: "red", blockers: ["Weekend"] };
     }
@@ -68,7 +70,7 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
         if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) 
             return { host_time: timeFormatter(hostZone).format(dateObj), total_score: -999, status: "red", blockers: ["Host Veto: 9-5"] };
     } else {
-        // NON-NEGOTIABLE SLEEP BOUNDARY (Before 7am or after 10:30pm)
+        // NON-NEGOTIABLE SLEEP BOUNDARY
         if (hostTime < HOURS.PAIN_START || hostTime >= HOURS.PAIN_END) 
             return { host_time: timeFormatter(hostZone).format(dateObj), total_score: -999, status: "red", blockers: ["Host Sleep Veto"] };
     }
@@ -85,20 +87,20 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
         if (localDay === 0 || localDay === 6) { 
             p = INTERNAL_POINTS.IMPOSSIBLE; m = MISERY_UNITS.Sleeping; hasDealbreaker = true; note = "Weekend"; 
         } 
-        // 1. Core Work Hours
+        // 1. Core Work Hours (Strict 9:00 AM start for 100 points)
         else if (localTime >= HOURS.WORK_START && localTime < HOURS.WORK_END) {
             if (localTime >= HOURS.LUNCH_START && localTime < HOURS.LUNCH_END) { p = INTERNAL_POINTS.OKAY; m = MISERY_UNITS.Lunch; note = "Lunch"; }
             else { p = INTERNAL_POINTS.PERFECT; m = MISERY_UNITS.Perfect; }
         }
-        // 2. Shoulder Hours
+        // 2. Shoulder Hours (8:00 AM)
         else if (localTime >= HOURS.SHOULDER_START && localTime < HOURS.SHOULDER_END) { 
             p = INTERNAL_POINTS.OKAY; m = MISERY_UNITS.Shoulder; note = "Shoulder"; 
         }
-        // 3. Stretch Hours
+        // 3. Stretch Hours (7:30 AM)
         else if (localTime >= HOURS.STRETCH_START && localTime < HOURS.STRETCH_END) { 
             p = INTERNAL_POINTS.STRETCH; m = MISERY_UNITS.Stretch; note = "Stretch"; 
         }
-        // 4. Painful Hours (Starts at 7:00 AM)
+        // 4. Painful Hours (Exactly 7:00 AM)
         else if (localTime >= HOURS.PAIN_START && localTime < HOURS.PAIN_END) { 
             p = INTERNAL_POINTS.PAINFUL; m = MISERY_UNITS.Painful; note = "Painful"; 
         }
@@ -112,8 +114,8 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
         if (note) blockers.push(`${loc.timezone}: ${note}`);
     }
 
-    const miseryScore = totalMisery * policy.weight;
-    const finalScore = totalHappiness - miseryScore;
+    const weightedPenalty = totalMisery * policy.weight;
+    const finalScore = totalHappiness - weightedPenalty;
 
     return {
         viewer_time: timeFormatter(viewerZone).format(dateObj),
@@ -131,6 +133,11 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
 
 app.post('/api/optimize', (req, res) => {
     const { date, timezones, host_timezone, viewer_timezone, scenario } = req.body;
+    
+    if (!date || !timezones || !host_timezone || !viewer_timezone) {
+        return res.status(400).json({ error: "Missing required fields" });
+    }
+
     const policy = POLICIES[scenario] || POLICIES.peer_sync;
     
     const hOffset = getOffsetInHours(host_timezone, date);
@@ -144,7 +151,6 @@ app.post('/api/optimize', (req, res) => {
         results.push(calculateSlotScore(startUTC + (i * 3600000), locations, hOffset, vOffset, host_timezone, viewer_timezone, policy));
     }
 
-    // Return all 24 rows, sorted by the highest total_score
     const sorted_results = results.sort((a, b) => b.total_score - a.total_score);
 
     res.json({ 
@@ -153,4 +159,6 @@ app.post('/api/optimize', (req, res) => {
     });
 });
 
-app.listen(3000, () => console.log('🚀 Orbit Server: Port 3000'));
+module.exports = app; // Export for Vercel
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Orbit Logic V2 Online on ${PORT}`));
