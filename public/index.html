@@ -2,140 +2,72 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit | Intelligent Meeting Scheduler</title>
+    <title>Orbit Scheduler</title>
     <style>
-        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --text: #1e293b; --border: #e2e8f0; --success: #10b981; --error: #ef4444; }
-        body { font-family: -apple-system, system-ui, sans-serif; max-width: 650px; margin: 40px auto; padding: 20px; background: var(--bg); color: var(--text); line-height: 1.5; }
-        .card { background: var(--card); padding: 30px; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid var(--border); }
-        .badge { display: inline-block; padding: 4px 12px; background: #dbeafe; color: #1e40af; border-radius: 20px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; margin-bottom: 16px; }
-        h1 { font-size: 1.5rem; margin: 0 0 20px 0; }
-        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; color: #64748b; }
-        input, textarea, select { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; box-sizing: border-box; margin-bottom: 20px; }
-        .row { display: flex; gap: 15px; }
-        .col { flex: 1; }
-        button { background: #0f172a; color: white; width: 100%; padding: 16px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        #results { margin-top: 25px; display: none; padding-top: 20px; border-top: 2px dashed var(--border); }
-        .slot { background: #0f172a; color: #f8fafc; padding: 18px; border-radius: 12px; margin-bottom: 12px; font-family: monospace; border-left: 4px solid var(--success); }
-        .meta { color: #94a3b8; font-size: 0.8rem; display: block; }
-        .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; border-top: 1px solid #334155; padding-top: 10px; }
+        body { font-family: sans-serif; background: #f8fafc; padding: 20px; color: #1e293b; max-width: 500px; margin: auto; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        input, select, textarea { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .slot { background: #0f172a; color: white; padding: 15px; border-radius: 8px; margin-top: 10px; font-family: monospace; }
+        .meta { color: #94a3b8; font-size: 0.8rem; }
     </style>
 </head>
 <body>
-
-<div class="card">
-    <div class="badge">Orbit Engine v2.5</div>
-    <h1>Global Meeting Optimizer</h1>
-
-    <label>Meeting Context</label>
-    <select id="scenario">
-        <option value="peer_sync">Internal Peer Sync (Fairness + Trust)</option>
-        <option value="client_meeting">External Client Meeting (Professional Boundaries)</option>
-        <option value="all_hands">Town Hall / All-Hands (Majority Rules)</option>
-        <option value="urgent_briefing">Urgent Briefing (Host Availability First)</option>
-        <option value="culture_chat">People First (Protect Individuals)</option>
-        <option value="gold_standard">Executive Interview (High Performance)</option>
-    </select>
-
-    <div class="row">
-        <div class="col">
-            <label>Date</label>
-            <input type="date" id="date">
-        </div>
-        <div class="col">
-            <label>Host City (Your Location)</label>
-            <input type="text" id="host" value="New York">
-        </div>
+    <div class="card">
+        <h2>Orbit Optimizer</h2>
+        <label>Meeting Type</label>
+        <select id="scenario">
+            <option value="peer_sync">Internal Sync (Fairness)</option>
+            <option value="client_meeting">Client Meeting (Strict Host)</option>
+        </select>
+        <input type="date" id="date">
+        <input type="text" id="hostCity" placeholder="Your City" value="New York">
+        <textarea id="teamCities" rows="2" placeholder="Team Cities (London, Tokyo...)">London, Tokyo</textarea>
+        <button onclick="run()">Find Times</button>
+        <div id="results"></div>
     </div>
 
-    <label>Team Member Cities</label>
-    <textarea id="team" rows="2" placeholder="London, Tokyo, Bengaluru">London, Tokyo, Bengaluru</textarea>
+    <script>
+        document.getElementById('date').valueAsDate = new Date();
+        const API = "http://localhost:3000/api";
 
-    <button onclick="calculate()" id="btn">Find Least Painful Times</button>
-    
-    <div id="results"></div>
-</div>
-
-<script>
-    // Set today as default
-    document.getElementById('date').valueAsDate = new Date();
-    
-    // FULL LOCALHOST URL
-    const API_BASE = "http://localhost:3000/api";
-
-    async function calculate() {
-        const resDiv = document.getElementById('results');
-        const btn = document.getElementById('btn');
-        
-        resDiv.innerHTML = "<div style='text-align:center; color: #2563eb;'><i>Checking connection & resolving cities...</i></div>";
-        resDiv.style.display = "block";
-        btn.disabled = true;
-
-        try {
-            // 1. Resolve Host
-            const hRes = await fetch(`${API_BASE}/resolve`, { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ city: document.getElementById('host').value }) 
-            });
-            if (!hRes.ok) throw new Error("Backend couldn't find your Host City.");
-            const hData = await hRes.json();
+        async function run() {
+            const out = document.getElementById('results');
+            out.innerHTML = "Resolving cities (this takes a few seconds to avoid API limits)...";
             
-            // 2. Resolve Team
-            const teamCities = document.getElementById('team').value.split(',').map(c => c.trim()).filter(c => c);
-            const teamIDs = [hData.timezone_id];
-            
-            for (let c of teamCities) {
-                const r = await fetch(`${API_BASE}/resolve`, { 
+            try {
+                // 1. Get all timezones in one go
+                const cities = [document.getElementById('hostCity').value, ...document.getElementById('teamCities').value.split(',').map(c => c.trim())];
+                const res = await fetch(`${API}/resolve-team`, { 
                     method: 'POST', 
                     headers: {'Content-Type': 'application/json'}, 
-                    body: JSON.stringify({ city: c }) 
+                    body: JSON.stringify({ cities }) 
                 });
-                const d = await r.json();
-                if(d.timezone_id) teamIDs.push(d.timezone_id);
-            }
+                const { timezones } = await res.json();
 
-            // 3. Optimize
-            const oRes = await fetch(`${API_BASE}/optimize`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    date: document.getElementById('date').value,
-                    timezones: [...new Set(teamIDs)],
-                    optimize_for: hData.timezone_id,
-                    scenario: document.getElementById('scenario').value
-                })
-            });
-            const data = await oRes.json();
-
-            // 4. Render
-            let html = "<b>TOP 3 RECOMMENDATIONS:</b><br><br>";
-            if (!data.top_3.length) {
-                html += "No slots found. Try a more 'Flexible' scenario.";
-            } else {
-                data.top_3.forEach((s, i) => {
-                    html += `<div class="slot"><b>#${i+1} ${s.display_time}</b><span class="meta">Fairness: ${Math.round(s.fairness_score)} | Tax: -${s.conflict_penalty}</span>`;
-                    html += `<div class="breakdown-grid">`;
-                    s.breakdown.forEach(loc => {
-                        const dot = loc.score >= 100 ? '🟢' : (loc.score >= 65 ? '🟡' : '🔴');
-                        html += `<div style="font-size:0.75rem">${dot} ${loc.zone.split('/').pop().replace('_',' ')}: ${loc.local_time}</div>`;
-                    });
-                    html += `</div></div>`;
+                // 2. Optimize
+                const opt = await fetch(`${API}/optimize`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        date: document.getElementById('date').value,
+                        timezones: timezones,
+                        optimize_for: timezones[0],
+                        scenario: document.getElementById('scenario').value
+                    })
                 });
-            }
-            resDiv.innerHTML = html;
+                const data = await opt.json();
 
-        } catch (e) {
-            console.error(e);
-            resDiv.innerHTML = `<div style="color:var(--error); border:1px solid; padding:10px; border-radius:8px;">
-                <b>Connection Error:</b> ${e.message}<br>
-                <small>1. Is 'node index.js' running?<br>2. Check console (F12) for details.</small>
-            </div>`;
-        } finally {
-            btn.disabled = false;
+                // 3. Render
+                let html = "";
+                data.top_3.forEach(s => {
+                    html += `<div class="slot"><b>${s.display_time}</b><br><span class="meta">Fairness: ${Math.round(s.fairness_score)} | Tax: -${s.conflict_penalty}</span><br>`;
+                    s.breakdown.forEach(l => html += `<small>${l.zone.split('/').pop()}: ${l.local_time}</small><br>`);
+                    html += `</div>`;
+                });
+                out.innerHTML = html || "No slots found.";
+            } catch (e) { out.innerHTML = "Error connecting to server. Is 'node index.js' running?"; }
         }
-    }
-</script>
+    </script>
 </body>
 </html>
