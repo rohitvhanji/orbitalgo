@@ -5,6 +5,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// --- CONFIGURATION ---
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
 const INTERNAL_POINTS = { PERFECT: 100, OKAY: 70, STRETCH: 40, PAINFUL: 10, IMPOSSIBLE: -100 };
 const HOURS = { WORK_START: 9, WORK_END: 17.5, LUNCH_START: 12, LUNCH_END: 13.5, SHOULDER_START: 8, SHOULDER_END: 18, STRETCH_START: 7, STRETCH_END: 20, PAIN_START: 6, PAIN_END: 22 };
@@ -29,10 +30,12 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     let hasDealbreaker = false;
     let breakdown = []; 
 
-    // --- 1. HOST CHECK ---
+    // 1. HOST CHECK
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDate.getUTCDay();
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
+    
+    // Simple format for host time
     const hostTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(hostDate);
 
     if (hostDay === 0 || hostDay === 6) {
@@ -44,7 +47,7 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         blockers.push(`Host: Outside Work (${hostTimeStr})`);
     }
 
-    // --- 2. TEAM SCORING ---
+    // 2. TEAM SCORING
     for (const loc of locations) {
         const localDate = new Date(utc + (loc.offsetVal * 3600000));
         const day = localDate.getUTCDay();
@@ -78,7 +81,6 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         totalScore += points; 
         maxScore += INTERNAL_POINTS.PERFECT;
         
-        // PURE: We only return the Timezone ID. The frontend must map this back to a name.
         if (points < INTERNAL_POINTS.OKAY) blockers.push(`${loc.timezone}: ${statusLabel}`);
         
         breakdown.push({
@@ -89,6 +91,7 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     }
 
     const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
+    
     let displayTime = "Invalid";
     try {
         displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
@@ -119,7 +122,7 @@ app.post('/api/resolve', async (req, res) => {
 });
 
 app.post('/api/optimize', (req, res) => {
-    // PURE: This endpoint only knows about IDs (Strings)
+    // PURE: Receives array of strings (Timezone IDs)
     const { date, timezones, optimize_for, host_timezone } = req.body;
     
     if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
@@ -132,7 +135,7 @@ app.post('/api/optimize', (req, res) => {
 
     const locations = [], errors = [];
     
-    // We expect timezones to be an array of STRINGS (IDs)
+    // We expect simple strings now: ["Asia/Tokyo", "Europe/London"]
     for (const tz of timezones) {
         const off = getOffsetInHours(tz, date);
         if (off === null) errors.push(tz);
@@ -141,6 +144,7 @@ app.post('/api/optimize', (req, res) => {
     
     if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
 
+    // Start at Host Midnight
     const utcMidnight = new Date(date + "T00:00:00Z").getTime();
     const startUTC = utcMidnight - (hostOffset * 3600000); 
     
