@@ -5,12 +5,30 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- CONFIGURATION ---
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
-const INTERNAL_POINTS = { PERFECT: 100, OKAY: 70, STRETCH: 40, PAINFUL: 10, IMPOSSIBLE: -100 };
-const HOURS = { WORK_START: 9, WORK_END: 17.5, LUNCH_START: 12, LUNCH_END: 13.5, SHOULDER_START: 8, SHOULDER_END: 18, STRETCH_START: 7, STRETCH_END: 20, PAIN_START: 6, PAIN_END: 22 };
 
-// NEW: Global Penalty Table
+const INTERNAL_POINTS = { 
+    PERFECT: 100, 
+    LUNCH: 75,       
+    SHOULDER: 65,    
+    STRETCH: 40, 
+    PAINFUL: 10, 
+    IMPOSSIBLE: -100 
+};
+
+const HOURS = { 
+    WORK_START: 9, 
+    WORK_END: 17.5, 
+    LUNCH_START: 12, 
+    LUNCH_END: 13.5, 
+    SHOULDER_START: 8, 
+    SHOULDER_END: 18, 
+    STRETCH_START: 7, 
+    STRETCH_END: 20, 
+    PAIN_START: 6, 
+    PAIN_END: 22 
+};
+
 const PENALTY = {
     "Perfect": 0,
     "Lunch": 1,
@@ -22,7 +40,9 @@ const PENALTY = {
     "Sleeping": 50
 };
 
-// --- HELPERS ---
+// Set weight to 10 for stronger fairness (lunch wins over pain)
+const MISERY_WEIGHT = 10; 
+
 function getOffsetInHours(timeZone, dateStr) {
     try {
         const date = new Date(dateStr + "T12:00:00Z");
@@ -35,37 +55,50 @@ function getOffsetInHours(timeZone, dateStr) {
     } catch (e) { return null; }
 }
 
-function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
-    let totalScore = 0;
-    let maxScore = 0;
+function calculateSlotScore(utc, locations, hostOffset, viewerZone, hostMode) {
+    let totalPoints = 0;
+    let maxPoints = 0;
     let blockers = [];
     let hasDealbreaker = false;
     let breakdown = []; 
-    let miseryScore = 0; // NEW COUNTER
+    let miseryScore = 0;
 
-    // 1. HOST CHECK
+    // --- 1. HOST ANALYSIS (Configurable) ---
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDate.getUTCDay();
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
     const hostTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(hostDate);
 
+    // Common Rule: No Weekends
     if (hostDay === 0 || hostDay === 6) {
         hasDealbreaker = true;
         blockers.push("Host: Weekend");
         miseryScore += PENALTY["Weekend"];
-    }
-    else if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) {
-        hasDealbreaker = true;
-        blockers.push(`Host: Outside Work (${hostTimeStr})`);
-        miseryScore += PENALTY["Painful"]; // Treat host unavailable as high pain
+    } 
+    
+    // BRANCHING LOGIC BASED ON MODE
+    else if (hostMode === 'strict') {
+        // STRICT MODE (Customer): Host MUST be 9-5:30. No exceptions.
+        if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) {
+            hasDealbreaker = true;
+            blockers.push(`Host: Strict Hours (${hostTimeStr})`);
+            miseryScore += PENALTY["Painful"]; 
+        }
+    } 
+    else {
+        // FLEXIBLE MODE (Peers): Host allows stretches, just not sleep.
+        if (hostTime < HOURS.PAIN_START || hostTime >= HOURS.PAIN_END) {
+            hasDealbreaker = true;
+            blockers.push(`Host: Sleeping (${hostTimeStr})`);
+            miseryScore += PENALTY["Sleeping"];
+        }
     }
 
-    // 2. TEAM SCORING
+    // --- 2. TEAM SCORING ---
     for (const loc of locations) {
         const localDate = new Date(utc + (loc.offsetVal * 3600000));
         const day = localDate.getUTCDay();
         const timeValue = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
-        
         const localTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(localDate);
 
         let points = 0;
@@ -76,29 +109,27 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         } else {
             if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) {
                 if (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) {
-                    points = INTERNAL_POINTS.OKAY; reason = "Lunch"; 
+                    points = INTERNAL_POINTS.LUNCH; reason = "Lunch"; 
                 } else {
-                    points = INTERNAL_POINTS.PERFECT; reason = "Perfect";
+                    points = INTERNAL_POINTS.PERFECT; reason = "Perfect"; 
                 }
             }
             else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) {
-                points = INTERNAL_POINTS.OKAY; reason = (timeValue < 12) ? "Early" : "Late";
+                points = INTERNAL_POINTS.SHOULDER; reason = (timeValue < 12) ? "Early" : "Late"; 
             }
             else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) {
-                points = INTERNAL_POINTS.STRETCH; reason = "Hard Stretch";
+                points = INTERNAL_POINTS.STRETCH; reason = "Hard Stretch"; 
             }
             else if ((timeValue >= HOURS.PAIN_START && timeValue < HOURS.STRETCH_START) || (timeValue >= HOURS.STRETCH_END && timeValue < HOURS.PAIN_END)) {
-                points = INTERNAL_POINTS.PAINFUL; reason = "Painful";
+                points = INTERNAL_POINTS.PAINFUL; reason = "Painful"; 
             }
             else {
                 points = INTERNAL_POINTS.IMPOSSIBLE; reason = "Sleeping"; hasDealbreaker = true;
             }
         }
         
-        totalScore += points; 
-        maxScore += INTERNAL_POINTS.PERFECT;
-        
-        // ADD TO MISERY SCORE
+        totalPoints += points; 
+        maxPoints += INTERNAL_POINTS.PERFECT;
         miseryScore += (PENALTY[reason] || 0);
 
         if (points < INTERNAL_POINTS.PERFECT) blockers.push(`${loc.timezone}: ${reason}`);
@@ -106,27 +137,20 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         breakdown.push({
             zone: loc.timezone,
             local_time: localTimeStr,
-            status: (points >= INTERNAL_POINTS.OKAY) ? "OK" : "Bad", 
-            reason: reason,  
+            status: reason,
             score: points
         });
     }
 
-    const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
+    const finalScore = totalPoints - (miseryScore * MISERY_WEIGHT);
+    const status = (hasDealbreaker || maxPoints === 0) ? "red" : ((finalScore / maxPoints) * 100 >= 70 ? "green" : "yellow");
+    
     let displayTime = "Invalid";
     try {
         displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
     } catch (e) { displayTime = "Invalid Zone"; }
 
-    return { 
-        utc, 
-        display_time: displayTime, 
-        score: totalScore, 
-        misery_score: miseryScore, // <--- EXPOSED IN JSON
-        status, 
-        blockers, 
-        breakdown 
-    };
+    return { utc, display_time: displayTime, score: finalScore, misery_score: miseryScore, status, blockers, breakdown };
 }
 
 // --- ROUTES ---
@@ -151,9 +175,12 @@ app.post('/api/resolve', async (req, res) => {
 });
 
 app.post('/api/optimize', (req, res) => {
-    const { date, timezones, optimize_for, host_timezone } = req.body;
+    const { date, timezones, optimize_for, host_timezone, host_mode } = req.body;
     
     if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
+
+    // DEFAULT TO STRICT IF MISSING
+    const mode = host_mode || 'strict'; 
 
     const hostZone = host_timezone || optimize_for || "UTC";
     const viewerZone = optimize_for || "UTC";
@@ -177,20 +204,14 @@ app.post('/api/optimize', (req, res) => {
     const results = [];
     for (let i = 0; i < 24; i++) {
         const slotUTC = startUTC + (i * 60 * 60000); 
-        results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone));
+        results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone, mode));
     }
 
-    // UPDATED SORT: Uses the exposed 'misery_score'
-    results.sort((a, b) => {
-        // 1. Primary Sort: High Score wins
-        if (b.score !== a.score) return b.score - a.score; 
-        
-        // 2. Secondary Sort: Low Misery wins
-        return a.misery_score - b.misery_score; 
-    });
+    results.sort((a, b) => b.score - a.score);
 
     res.json({ 
         host: hostZone,
+        mode: mode,
         viewer: viewerZone,
         top_3: results.filter(r => r.status !== 'red').slice(0, 3), 
         all_slots: results 
