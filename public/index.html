@@ -21,6 +21,12 @@
 
         #results { white-space: pre-wrap; background: #18181b; color: #00ff9d; padding: 20px; border-radius: 8px; font-family: monospace; overflow-x: auto; display: none; }
         .tag { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 15px; }
+
+        /* NEW STYLES FOR HOST BOX */
+        .host-box { background: #f0f9ff; border: 1px solid #bae6fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; }
+        .host-col { flex: 1; }
+        .host-label { color: #0369a1; }
+        .host-desc { font-size: 0.75rem; color: #0c4a6e; display: block; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -28,23 +34,28 @@
     <div class="card">
         <span class="tag">UNIVERSAL EXPRESS API</span>
         <h1>Orbit Intelligence Engine</h1>
-        <p style="color:#71717a; font-size:0.9rem;">
-            Enter city names. The frontend chains API calls: Resolve -> Optimize.
+        <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">
+            Calculates 1-hour slots. Enforces strict 9-5 for the Host.
         </p>
         
-        <div style="display:flex; gap:10px;">
-            <div style="flex:1">
-                <label>Target Date</label>
-                <input type="date" id="dateInput" value="2023-11-01">
+        <label>Target Date</label>
+        <input type="date" id="dateInput" value="2023-11-01">
+
+        <div class="host-box">
+            <div class="host-col">
+                <label class="host-label">🎤 Meeting Host (Gatekeeper)</label>
+                <input type="text" id="hostInput" value="New York" placeholder="e.g. London">
+                <small class="host-desc">Must be awake (9am - 5:30pm). Slot is Red if unavailable.</small>
             </div>
-            <div style="flex:1">
-                <label>View Results In (Timezone)</label>
-                <input type="text" id="viewerZone" value="America/New_York" placeholder="e.g. Asia/Kolkata">
+            <div class="host-col">
+                <label class="host-label">👀 Viewer (You)</label>
+                <input type="text" id="viewerInput" value="Bengaluru" placeholder="e.g. Tokyo">
+                <small class="host-desc">Results are shown in this timezone.</small>
             </div>
         </div>
 
         <label>Team Locations (Comma Separated)</label>
-        <textarea id="cityInput">London, Bengaluru, Tokyo, NYC</textarea>
+        <textarea id="cityInput">London, Tokyo</textarea>
         
         <div id="status-log"></div>
 
@@ -71,39 +82,58 @@
             const resBox = document.getElementById('results');
             
             btn.disabled = true;
-            btn.innerText = "Processing...";
+            btn.innerText = "Resolving Locations...";
             resBox.style.display = 'none';
             log.innerHTML = '';
 
             try {
+                // 1. Get Inputs from the NEW fields
                 const cities = document.getElementById('cityInput').value.split(',').map(s => s.trim()).filter(s => s);
-                const viewerZone = document.getElementById('viewerZone').value;
-                const resolvedIDs = [];
+                const hostCity = document.getElementById('hostInput').value.trim();   // <--- NEW
+                const viewerCity = document.getElementById('viewerInput').value.trim(); // <--- NEW
 
-                // 1. CALL RESOLVE API
-                for (const city of cities) {
+                // Helper: Resolve a single city
+                const resolveCity = async (name, label) => {
                     try {
                         const res = await fetch('/api/resolve', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ city })
+                            body: JSON.stringify({ city: name })
                         });
                         const data = await res.json();
-                        
                         if (res.ok) {
-                            resolvedIDs.push(data.timezone_id);
-                            log.innerHTML += `<div class="log-ok">✓ Resolved: ${city} → ${data.timezone_id}</div>`;
+                            log.innerHTML += `<div class="log-ok">✓ ${label}: ${data.resolved_name} (${data.timezone_id})</div>`;
+                            return data.timezone_id;
                         } else {
                             throw new Error(data.error);
                         }
                     } catch (e) {
-                        log.innerHTML += `<div class="log-err">✕ Failed: ${city} (${e.message})</div>`;
+                        log.innerHTML += `<div class="log-err">✕ Failed ${label}: ${name}</div>`;
+                        throw e;
                     }
+                };
+
+                // 2. Resolve Host & Viewer first
+                const hostID = await resolveCity(hostCity, "Host");
+                const viewerID = await resolveCity(viewerCity, "Viewer");
+
+                // 3. Resolve Team
+                const teamIDs = [];
+                for (const city of cities) {
+                    try {
+                        const id = await resolveCity(city, "Team");
+                        teamIDs.push(id);
+                    } catch(e) {}
                 }
 
-                if (resolvedIDs.length === 0) throw new Error("No valid locations found.");
+                // IMPORTANT: Add Host to the Team list so their convenience score is counted!
+                if (!teamIDs.includes(hostID)) {
+                    teamIDs.push(hostID);
+                }
 
-                // 2. CALL OPTIMIZE API
+                if (teamIDs.length === 0) throw new Error("No valid locations found.");
+
+                // 4. Call Optimize API with explicit Host & Viewer
                 btn.innerText = "Calculating Schedule...";
                 
                 const optRes = await fetch('/api/optimize', {
@@ -111,19 +141,21 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         date: document.getElementById('dateInput').value,
-                        timezones: resolvedIDs,
-                        optimize_for: viewerZone
+                        timezones: teamIDs,
+                        host_timezone: hostID,      // <--- Logic uses this for 9-5 check
+                        optimize_for: viewerID      // <--- Logic uses this for display formatting
                     })
                 });
 
                 const optData = await optRes.json();
                 if (!optRes.ok) throw new Error(optData.error || "Optimization Failed");
 
-                // 3. RENDER
-                let output = `⚡ BEST MATCHES (Viewer: ${viewerZone}):\n\n`;
+                // 5. Render Results
+                let output = `⚡ BEST MATCHES (Viewer Time: ${optData.viewer}):\n`;
+                output += `   Host Time: ${optData.host}\n\n`;
                 
                 if (optData.top_3.length === 0) {
-                    output += "⚠️ No viable times found.\n";
+                    output += "⚠️ No viable times found where Host is available.\n";
                 }
 
                 optData.top_3.forEach((slot, i) => {
@@ -135,6 +167,10 @@
                     }
                     output += `\n`;
                 });
+
+                // Debug Data
+                output += `--------------------------------\n`;
+                output += `RAW DATA:\n` + JSON.stringify(optData, null, 2);
 
                 resBox.innerText = output;
                 resBox.style.display = 'block';
