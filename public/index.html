@@ -2,71 +2,189 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Orbit Scheduler</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbit Universal Engine</title>
     <style>
-        body { font-family: sans-serif; background: #f8fafc; padding: 20px; color: #1e293b; max-width: 500px; margin: auto; }
-        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        input, select, textarea { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; background: #0f172a; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        .slot { background: #0f172a; color: white; padding: 15px; border-radius: 8px; margin-top: 10px; font-family: monospace; }
-        .meta { color: #94a3b8; font-size: 0.8rem; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f4f5; color: #18181b; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 20px; }
+        h1 { margin-top: 0; font-size: 1.5rem; }
+        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #e4e4e7; border-radius: 6px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px; box-sizing: border-box; }
+        textarea { height: 80px; }
+        button { background: #000; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        button:hover { opacity: 0.8; }
+        button:disabled { background: #a1a1aa; cursor: not-allowed; }
+        
+        #status-log { margin-bottom: 15px; font-size: 0.85rem; color: #64748b; font-family: monospace; }
+        .log-ok { color: #10b981; }
+        .log-err { color: #ef4444; }
+
+        #results { white-space: pre-wrap; background: #18181b; color: #00ff9d; padding: 20px; border-radius: 8px; font-family: monospace; overflow-x: auto; display: none; }
+        .tag { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 15px; }
+
+        /* Highlight the Host Box */
+        .host-box {
+            background: #f0f9ff; 
+            border: 1px solid #bae6fd; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+        }
+        .host-col { flex: 1; }
+        .host-label { color: #0369a1; }
+        .host-desc { font-size: 0.75rem; color: #0c4a6e; display: block; margin-top: 5px; }
     </style>
 </head>
 <body>
+
     <div class="card">
-        <h2>Orbit Optimizer</h2>
-        <label>Meeting Type</label>
-        <select id="scenario">
-            <option value="peer_sync">Internal Sync (Fairness)</option>
-            <option value="client_meeting">Client Meeting (Strict Host)</option>
-        </select>
-        <input type="date" id="date">
-        <input type="text" id="hostCity" placeholder="Your City" value="New York">
-        <textarea id="teamCities" rows="2" placeholder="Team Cities (London, Tokyo...)">London, Tokyo</textarea>
-        <button onclick="run()">Find Times</button>
-        <div id="results"></div>
+        <span class="tag">UNIVERSAL EXPRESS API</span>
+        <h1>Orbit Intelligence Engine</h1>
+        <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">
+            Calculates 1-hour slots. Enforces strict 9-5 for the Host.
+        </p>
+        
+        <label>Target Date</label>
+        <input type="date" id="dateInput" value="2023-11-01">
+
+        <div class="host-box">
+            <div class="host-col">
+                <label class="host-label">🎤 Meeting Host (Gatekeeper)</label>
+                <input type="text" id="hostInput" value="New York" placeholder="e.g. London">
+                <small class="host-desc">Must be awake (9am - 5:30pm). If they can't make it, the slot is Red.</small>
+            </div>
+            <div class="host-col">
+                <label class="host-label">👀 Viewer (You)</label>
+                <input type="text" id="viewerInput" value="Bengaluru" placeholder="e.g. Tokyo">
+                <small class="host-desc">Results are shown in this timezone.</small>
+            </div>
+        </div>
+
+        <label>Team Locations (Comma Separated)</label>
+        <textarea id="cityInput">London, Bengaluru, Tokyo, New York</textarea>
+        
+        <div id="status-log"></div>
+
+        <button onclick="runSimulation()" id="btn">Find Best Times</button>
+        <div style="margin-top:10px; text-align:right;">
+             <small><a href="#" onclick="checkHealth()">Check Server Status</a></small>
+        </div>
     </div>
 
+    <div id="results"></div>
+
     <script>
-        document.getElementById('date').valueAsDate = new Date();
-        const API = "http://localhost:3000/api";
-
-        async function run() {
-            const out = document.getElementById('results');
-            out.innerHTML = "Resolving cities (this takes a few seconds to avoid API limits)...";
-            
+        async function checkHealth() {
             try {
-                // 1. Get all timezones in one go
-                const cities = [document.getElementById('hostCity').value, ...document.getElementById('teamCities').value.split(',').map(c => c.trim())];
-                const res = await fetch(`${API}/resolve-team`, { 
-                    method: 'POST', 
-                    headers: {'Content-Type': 'application/json'}, 
-                    body: JSON.stringify({ cities }) 
-                });
-                const { timezones } = await res.json();
+                const res = await fetch('/api/health');
+                const data = await res.json();
+                alert(`STATUS: ${data.status}\nENV: ${data.env}`);
+            } catch(e) { alert("Server Offline"); }
+        }
 
-                // 2. Optimize
-                const opt = await fetch(`${API}/optimize`, {
+        async function runSimulation() {
+            const btn = document.getElementById('btn');
+            const log = document.getElementById('status-log');
+            const resBox = document.getElementById('results');
+            
+            btn.disabled = true;
+            btn.innerText = "Resolving Locations...";
+            resBox.style.display = 'none';
+            log.innerHTML = '';
+
+            try {
+                // 1. Gather Inputs
+                const cities = document.getElementById('cityInput').value.split(',').map(s => s.trim()).filter(s => s);
+                const hostCity = document.getElementById('hostInput').value.trim();
+                const viewerCity = document.getElementById('viewerInput').value.trim();
+
+                // 2. Helper to Resolve One City
+                const resolveCity = async (name, label) => {
+                    try {
+                        const res = await fetch('/api/resolve', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ city: name })
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                            log.innerHTML += `<div class="log-ok">✓ ${label}: ${data.resolved_name} (${data.timezone_id})</div>`;
+                            return data.timezone_id;
+                        } else {
+                            throw new Error(data.error);
+                        }
+                    } catch (e) {
+                        log.innerHTML += `<div class="log-err">✕ Failed ${label}: ${name}</div>`;
+                        throw e;
+                    }
+                };
+
+                // 3. Resolve Host & Viewer First
+                const hostID = await resolveCity(hostCity, "Host");
+                const viewerID = await resolveCity(viewerCity, "Viewer");
+
+                // 4. Resolve Team
+                const teamIDs = [];
+                for (const city of cities) {
+                    try {
+                        const id = await resolveCity(city, "Team");
+                        teamIDs.push(id);
+                    } catch(e) {} // Continue even if one fails
+                }
+
+                if (teamIDs.length === 0) throw new Error("No valid team locations found.");
+
+                // 5. CALL OPTIMIZE API
+                btn.innerText = "Calculating Schedule...";
+                
+                const optRes = await fetch('/api/optimize', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        date: document.getElementById('date').value,
-                        timezones: timezones,
-                        optimize_for: timezones[0],
-                        scenario: document.getElementById('scenario').value
+                        date: document.getElementById('dateInput').value,
+                        timezones: teamIDs,
+                        host_timezone: hostID,      // <--- NEW
+                        viewer_timezone: viewerID   // <--- NEW (Renamed from optimize_for)
                     })
                 });
-                const data = await opt.json();
 
-                // 3. Render
-                let html = "";
-                data.top_3.forEach(s => {
-                    html += `<div class="slot"><b>${s.display_time}</b><br><span class="meta">Fairness: ${Math.round(s.fairness_score)} | Tax: -${s.conflict_penalty}</span><br>`;
-                    s.breakdown.forEach(l => html += `<small>${l.zone.split('/').pop()}: ${l.local_time}</small><br>`);
-                    html += `</div>`;
+                const optData = await optRes.json();
+                if (!optRes.ok) throw new Error(optData.error || "Optimization Failed");
+
+                // 6. RENDER RESULTS
+                let output = `⚡ BEST MATCHES (Viewer Time: ${optData.viewer}):\n`;
+                output += `   Host Time: ${optData.host}\n\n`;
+                
+                if (optData.top_3.length === 0) {
+                    output += "⚠️ No viable times found where Host is available.\n";
+                }
+
+                optData.top_3.forEach((slot, i) => {
+                    output += `#${i+1} [ ${slot.display_time} ] Score: ${slot.score}\n`;
+                    if(slot.blockers && slot.blockers.length) {
+                        slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
+                    } else {
+                        output += `   ✨ Perfect Match\n`;
+                    }
+                    output += `\n`;
                 });
-                out.innerHTML = html || "No slots found.";
-            } catch (e) { out.innerHTML = "Error connecting to server. Is 'node index.js' running?"; }
+
+                output += `--------------------------------\n`;
+                output += `RAW DATA:\n` + JSON.stringify(optData, null, 2);
+
+                resBox.innerText = output;
+                resBox.style.display = 'block';
+
+            } catch (err) {
+                resBox.innerText = "❌ ERROR:\n" + err.message;
+                resBox.style.display = 'block';
+                resBox.style.color = '#f87171';
+            } finally {
+                btn.innerText = "Find Best Times";
+                btn.disabled = false;
+            }
         }
     </script>
 </body>
