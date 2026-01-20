@@ -1,14 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 
-// Initialize Express
 const app = express();
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// --- CONFIGURATION ---
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
 const INTERNAL_POINTS = { PERFECT: 100, OKAY: 70, STRETCH: 40, PAINFUL: 10, IMPOSSIBLE: -100 };
 const HOURS = { WORK_START: 9, WORK_END: 17.5, LUNCH_START: 12, LUNCH_END: 13.5, SHOULDER_START: 8, SHOULDER_END: 18, STRETCH_START: 7, STRETCH_END: 20, PAIN_START: 6, PAIN_END: 22 };
@@ -31,18 +27,13 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     let maxScore = 0;
     let blockers = [];
     let hasDealbreaker = false;
-    
-    // NEW: Array to store status of every single location for this specific slot
     let breakdown = []; 
 
     // --- 1. HOST CHECK ---
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDate.getUTCDay();
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
-
-    const hostTimeStr = new Intl.DateTimeFormat("en-US", { 
-        timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true 
-    }).format(hostDate);
+    const hostTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(hostDate);
 
     if (hostDay === 0 || hostDay === 6) {
         hasDealbreaker = true;
@@ -59,10 +50,7 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         const day = localDate.getUTCDay();
         const timeValue = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
         
-        // Format Local Time for Debugging
-        const localTimeStr = new Intl.DateTimeFormat("en-US", { 
-            timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true 
-        }).format(localDate);
+        const localTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(localDate);
 
         let points = 0, statusLabel = "";
 
@@ -90,33 +78,23 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         totalScore += points; 
         maxScore += INTERNAL_POINTS.PERFECT;
         
+        // PURE: We only return the Timezone ID. The frontend must map this back to a name.
         if (points < INTERNAL_POINTS.OKAY) blockers.push(`${loc.timezone}: ${statusLabel}`);
         
-        // ADD TO BREAKDOWN REPORT
         breakdown.push({
-            city: loc.timezone,
+            zone: loc.timezone,
             local_time: localTimeStr,
-            status: statusLabel,
-            points: points
+            status: statusLabel
         });
     }
 
-    // --- 3. FINAL STATUS ---
     const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
-
     let displayTime = "Invalid";
     try {
         displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
     } catch (e) { displayTime = "Invalid Zone"; }
 
-    return { 
-        utc, 
-        display_time: displayTime, 
-        score: totalScore, 
-        status, 
-        blockers,
-        breakdown // <--- SENT BACK TO FRONTEND
-    };
+    return { utc, display_time: displayTime, score: totalScore, status, blockers, breakdown };
 }
 
 // --- ROUTES ---
@@ -141,28 +119,28 @@ app.post('/api/resolve', async (req, res) => {
 });
 
 app.post('/api/optimize', (req, res) => {
+    // PURE: This endpoint only knows about IDs (Strings)
     const { date, timezones, optimize_for, host_timezone } = req.body;
+    
     if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
 
-    // 1. Roles
     const hostZone = host_timezone || optimize_for || "UTC";
     const viewerZone = optimize_for || "UTC";
 
-    // 2. Pre-calculate Host Offset
     const hostOffset = getOffsetInHours(hostZone, date);
     if (hostOffset === null) return res.status(400).json({ error: "Invalid Host Timezone" });
 
-    // 3. Team
     const locations = [], errors = [];
+    
+    // We expect timezones to be an array of STRINGS (IDs)
     for (const tz of timezones) {
         const off = getOffsetInHours(tz, date);
         if (off === null) errors.push(tz);
         else locations.push({ timezone: tz, offsetVal: off });
     }
+    
     if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
 
-    // 4. RUN LOOP (24 Hours)
-    // Start at Host Midnight
     const utcMidnight = new Date(date + "T00:00:00Z").getTime();
     const startUTC = utcMidnight - (hostOffset * 3600000); 
     
