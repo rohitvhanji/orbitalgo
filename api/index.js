@@ -5,30 +5,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// --- CONFIGURATION ---
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
 
+// 1. SCORING CONSTANTS (The "Good" Points)
 const INTERNAL_POINTS = { 
     PERFECT: 100, 
-    LUNCH: 75,       
-    SHOULDER: 65,    
+    LUNCH: 75,       // Better than shoulder
+    SHOULDER: 65,    // Worse than lunch
     STRETCH: 40, 
     PAINFUL: 10, 
     IMPOSSIBLE: -100 
 };
 
-const HOURS = { 
-    WORK_START: 9, 
-    WORK_END: 17.5, 
-    LUNCH_START: 12, 
-    LUNCH_END: 13.5, 
-    SHOULDER_START: 8, 
-    SHOULDER_END: 18, 
-    STRETCH_START: 7, 
-    STRETCH_END: 20, 
-    PAIN_START: 6, 
-    PAIN_END: 22 
-};
-
+// 2. PENALTY CONSTANTS (The "Pain" Points)
 const PENALTY = {
     "Perfect": 0,
     "Lunch": 1,
@@ -40,9 +30,19 @@ const PENALTY = {
     "Sleeping": 50
 };
 
-// Set weight to 10 for stronger fairness (lunch wins over pain)
+// 3. THE WEIGHT (How much we care about pain)
+// A weight of 10 means 1 person in "Pain" (10 misery) cancels out 100 points of happiness.
 const MISERY_WEIGHT = 10; 
 
+const HOURS = { 
+    WORK_START: 9, WORK_END: 17.5, 
+    LUNCH_START: 12, LUNCH_END: 13.5, 
+    SHOULDER_START: 8, SHOULDER_END: 18, 
+    STRETCH_START: 7, STRETCH_END: 20, 
+    PAIN_START: 6, PAIN_END: 22 
+};
+
+// --- HELPERS ---
 function getOffsetInHours(timeZone, dateStr) {
     try {
         const date = new Date(dateStr + "T12:00:00Z");
@@ -56,41 +56,37 @@ function getOffsetInHours(timeZone, dateStr) {
 }
 
 function calculateSlotScore(utc, locations, hostOffset, viewerZone, hostMode) {
-    let totalPoints = 0;
-    let maxPoints = 0;
+    let totalHappiness = 0; // Was 'totalPoints'
+    let maxPossible = 0;
     let blockers = [];
     let hasDealbreaker = false;
     let breakdown = []; 
-    let miseryScore = 0;
+    let miseryIndex = 0;    // Was 'miseryScore'
 
-    // --- 1. HOST ANALYSIS (Configurable) ---
+    // --- 1. HOST ANALYSIS ---
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDate.getUTCDay();
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
     const hostTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(hostDate);
 
-    // Common Rule: No Weekends
     if (hostDay === 0 || hostDay === 6) {
         hasDealbreaker = true;
         blockers.push("Host: Weekend");
-        miseryScore += PENALTY["Weekend"];
+        miseryIndex += PENALTY["Weekend"];
     } 
-    
-    // BRANCHING LOGIC BASED ON MODE
     else if (hostMode === 'strict') {
-        // STRICT MODE (Customer): Host MUST be 9-5:30. No exceptions.
         if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) {
             hasDealbreaker = true;
             blockers.push(`Host: Strict Hours (${hostTimeStr})`);
-            miseryScore += PENALTY["Painful"]; 
+            miseryIndex += PENALTY["Painful"]; 
         }
     } 
     else {
-        // FLEXIBLE MODE (Peers): Host allows stretches, just not sleep.
+        // Flexible Mode
         if (hostTime < HOURS.PAIN_START || hostTime >= HOURS.PAIN_END) {
             hasDealbreaker = true;
             blockers.push(`Host: Sleeping (${hostTimeStr})`);
-            miseryScore += PENALTY["Sleeping"];
+            miseryIndex += PENALTY["Sleeping"];
         }
     }
 
@@ -128,9 +124,9 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone, hostMode) {
             }
         }
         
-        totalPoints += points; 
-        maxPoints += INTERNAL_POINTS.PERFECT;
-        miseryScore += (PENALTY[reason] || 0);
+        totalHappiness += points; 
+        maxPossible += INTERNAL_POINTS.PERFECT;
+        miseryIndex += (PENALTY[reason] || 0);
 
         if (points < INTERNAL_POINTS.PERFECT) blockers.push(`${loc.timezone}: ${reason}`);
         
@@ -142,15 +138,31 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone, hostMode) {
         });
     }
 
-    const finalScore = totalPoints - (miseryScore * MISERY_WEIGHT);
-    const status = (hasDealbreaker || maxPoints === 0) ? "red" : ((finalScore / maxPoints) * 100 >= 70 ? "green" : "yellow");
+    // --- 3. THE FAIRNESS CALCULATION ---
+    const conflictPenalty = miseryIndex * MISERY_WEIGHT;
+    const finalScore = totalHappiness - conflictPenalty;
+
+    const status = (hasDealbreaker || maxPossible === 0) ? "red" : ((finalScore / maxPossible) * 100 >= 70 ? "green" : "yellow");
     
     let displayTime = "Invalid";
     try {
         displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
     } catch (e) { displayTime = "Invalid Zone"; }
 
-    return { utc, display_time: displayTime, score: finalScore, misery_score: miseryScore, status, blockers, breakdown };
+    return { 
+        utc, 
+        display_time: displayTime, 
+        
+        // THE 4 SCORES
+        fairness_score: finalScore,      // The Ranker
+        happiness_score: totalHappiness, // The Good
+        misery_index: miseryIndex,       // The Bad
+        conflict_penalty: conflictPenalty, // The Tax
+        
+        status, 
+        blockers, 
+        breakdown 
+    };
 }
 
 // --- ROUTES ---
@@ -179,9 +191,7 @@ app.post('/api/optimize', (req, res) => {
     
     if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
 
-    // DEFAULT TO STRICT IF MISSING
     const mode = host_mode || 'strict'; 
-
     const hostZone = host_timezone || optimize_for || "UTC";
     const viewerZone = optimize_for || "UTC";
 
@@ -207,7 +217,8 @@ app.post('/api/optimize', (req, res) => {
         results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone, mode));
     }
 
-    results.sort((a, b) => b.score - a.score);
+    // Sort by Fairness Score
+    results.sort((a, b) => b.fairness_score - a.fairness_score);
 
     res.json({ 
         host: hostZone,
