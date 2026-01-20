@@ -1,7 +1,8 @@
 // api/resolve.js
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; // Kept secure on server
 
-export default async function handler(req, res) {
+export default async function handler(req, res)
+{
     // 1. CORS Headers (Allow everyone to call this API)
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,7 +10,8 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
     // Handle Pre-flight request
-    if (req.method === 'OPTIONS') {
+    if (req.method === 'OPTIONS')
+    {
         res.status(200).end();
         return;
     }
@@ -17,13 +19,15 @@ export default async function handler(req, res) {
     const { city } = req.body;
     if (!city) return res.status(400).json({ error: "Missing 'city'" });
 
-    try {
+    try
+    {
         // A. Geocoding (OpenStreetMap)
         const geoUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`;
         const geoRes = await fetch(geoUrl, { headers: { 'User-Agent': 'OrbitApp/1.0' } });
         const geoData = await geoRes.json();
 
-        if (!geoData || geoData.length === 0) {
+        if (!geoData || geoData.length === 0)
+        {
             return res.status(404).json({ error: "City not found" });
         }
 
@@ -32,7 +36,8 @@ export default async function handler(req, res) {
         const tzRes = await fetch(tzUrl);
         const tzData = await tzRes.json();
 
-        if (tzData.status !== 'OK') {
+        if (tzData.status !== 'OK')
+        {
             return res.status(500).json({ error: "Timezone service failed" });
         }
 
@@ -44,7 +49,8 @@ export default async function handler(req, res) {
             gmt_offset: tzData.gmtOffset / 3600
         });
 
-    } catch (e) {
+    } catch (e)
+    {
         return res.status(500).json({ error: e.message });
     }
 }

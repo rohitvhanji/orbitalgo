@@ -7,29 +7,34 @@ const INTERNAL_POINTS = { PERFECT: 100, OKAY: 70, STRETCH: 40, PAINFUL: 10, IMPO
 const HOURS = { WORK_START: 9, WORK_END: 17, LUNCH_START: 12, LUNCH_END: 13, SHOULDER_START: 8, SHOULDER_END: 18, STRETCH_START: 7, STRETCH_END: 20, PAIN_START: 6, PAIN_END: 22 };
 
 // --- HELPERS ---
-function getOffsetInHours(timeZone, dateStr) {
-    try {
+function getOffsetInHours(timeZone, dateStr)
+{
+    try
+    {
         const date = new Date(dateStr + "T12:00:00Z");
         const format = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" });
         const parts = format.formatToParts(date);
         const val = parts.find(p => p.type === "timeZoneName").value.replace("GMT", "").replace("UTC", "");
         if (!val) return 0;
         const [h, m] = val.split(":").map(Number);
-        return h + (h < 0 ? -(m/60||0) : (m/60||0));
+        return h + (h < 0 ? -(m / 60 || 0) : (m / 60 || 0));
     } catch (e) { return null; }
 }
 
-function calculateSlotScore(utc, locations, viewerZone) {
+function calculateSlotScore(utc, locations, viewerZone)
+{
     let totalScore = 0, maxScore = 0, blockers = [], hasDealbreaker = false;
-    
-    for (const loc of locations) {
+
+    for (const loc of locations)
+    {
         const localDate = new Date(utc + (loc.offsetVal * 3600000));
         const day = localDate.getUTCDay();
         const timeValue = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
         let points = 0, note = "";
 
         if (day === 0 || day === 6) { points = INTERNAL_POINTS.IMPOSSIBLE; note = "Weekend"; hasDealbreaker = true; }
-        else {
+        else
+        {
             if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) points = (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) ? INTERNAL_POINTS.OKAY : INTERNAL_POINTS.PERFECT;
             else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) points = INTERNAL_POINTS.OKAY;
             else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) { points = INTERNAL_POINTS.STRETCH; note = "Hard"; }
@@ -40,17 +45,19 @@ function calculateSlotScore(utc, locations, viewerZone) {
         if (note) blockers.push(`${loc.timezone}: ${note}`);
     }
 
-    const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore/maxScore)*100 >= 80 ? "green" : "yellow");
-    
+    const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
+
     let displayTime = "Invalid";
-    try {
-        displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour:'numeric', minute:'2-digit', hour12:true }).format(new Date(utc));
-    } catch(e) { displayTime = "Invalid Zone"; }
+    try
+    {
+        displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
+    } catch (e) { displayTime = "Invalid Zone"; }
 
     return { utc, display_time: displayTime, score: totalScore, status, blockers };
 }
 
-export default function handler(req, res) {
+export default function handler(req, res)
+{
     // CORS Headers
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -63,17 +70,18 @@ export default function handler(req, res) {
     if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
 
     const locations = [], errors = [];
-    for (const tz of timezones) {
+    for (const tz of timezones)
+    {
         const off = getOffsetInHours(tz, date);
         if (off === null) errors.push(tz);
         else locations.push({ timezone: tz, offsetVal: off });
     }
-    
+
     if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
 
     const results = [];
     const startUTC = new Date(date + "T00:00:00Z").getTime();
-    for (let i = 0; i < 48; i++) results.push(calculateSlotScore(startUTC + (i*30*60000), locations, optimize_for || "UTC"));
+    for (let i = 0; i < 48; i++) results.push(calculateSlotScore(startUTC + (i * 30 * 60000), locations, optimize_for || "UTC"));
 
-    res.status(200).json({ top_3: results.sort((a,b) => b.score - a.score).filter(r => r.status !== 'red').slice(0,3), all_slots: results });
+    res.status(200).json({ top_3: results.sort((a, b) => b.score - a.score).filter(r => r.status !== 'red').slice(0, 3), all_slots: results });
 }
