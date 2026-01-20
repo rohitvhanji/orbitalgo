@@ -2,190 +2,92 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit Universal Engine</title>
+    <title>Orbit Intelligence Engine</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f4f5; color: #18181b; }
-        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 20px; }
-        h1 { margin-top: 0; font-size: 1.5rem; }
-        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
-        input, textarea { width: 100%; padding: 10px; border: 1px solid #e4e4e7; border-radius: 6px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px; box-sizing: border-box; }
-        textarea { height: 80px; }
-        button { background: #000; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; }
-        button:hover { opacity: 0.8; }
-        button:disabled { background: #a1a1aa; cursor: not-allowed; }
-        
-        #status-log { margin-bottom: 15px; font-size: 0.85rem; color: #64748b; font-family: monospace; }
-        .log-ok { color: #10b981; }
-        .log-err { color: #ef4444; }
-
-        #results { white-space: pre-wrap; background: #18181b; color: #00ff9d; padding: 20px; border-radius: 8px; font-family: monospace; overflow-x: auto; display: none; }
-        .tag { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 15px; }
-
-        /* Highlight the Host Box */
-        .host-box {
-            background: #f0f9ff; 
-            border: 1px solid #bae6fd; 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin-bottom: 20px;
-            display: flex;
-            gap: 15px;
-        }
-        .host-col { flex: 1; }
-        .host-label { color: #0369a1; }
-        .host-desc { font-size: 0.75rem; color: #0c4a6e; display: block; margin-top: 5px; }
+        body { font-family: system-ui, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; background: #f4f4f5; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        select, input, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 15px; box-sizing: border-box; font-size: 1rem; }
+        button { width: 100%; padding: 15px; background: #000; color: #fff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        #results { margin-top: 20px; background: #18181b; color: #10b981; padding: 20px; border-radius: 8px; font-family: monospace; white-space: pre-wrap; display: none; }
     </style>
 </head>
 <body>
 
-    <div class="card">
-        <span class="tag">UNIVERSAL EXPRESS API</span>
-        <h1>Orbit Intelligence Engine</h1>
-        <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">
-            Calculates 1-hour slots. Enforces strict 9-5 for the Host.
-        </p>
-        
-        <label>Target Date</label>
-        <input type="date" id="dateInput" value="2023-11-01">
+<div class="card">
+    <h1>Orbit Optimizer</h1>
+    
+    <label>What kind of meeting is this?</label>
+    <select id="scenario">
+        <option value="peer_sync">Internal Peer Sync (Fairness + Trust)</option>
+        <option value="client_meeting">External Client Meeting (Strict Host)</option>
+        <option value="all_hands">Town Hall / All-Hands (Majority Rules)</option>
+        <option value="urgent_briefing">Urgent Briefing (Host Availability First)</option>
+        <option value="culture_chat">People First (Protect Individuals)</option>
+        <option value="gold_standard">Executive Interview (High Performance)</option>
+    </select>
 
-        <div class="host-box">
-            <div class="host-col">
-                <label class="host-label">🎤 Meeting Host (Gatekeeper)</label>
-                <input type="text" id="hostInput" value="New York" placeholder="e.g. London">
-                <small class="host-desc">Must be awake (9am - 5:30pm). If they can't make it, the slot is Red.</small>
-            </div>
-            <div class="host-col">
-                <label class="host-label">👀 Viewer (You)</label>
-                <input type="text" id="viewerInput" value="Bengaluru" placeholder="e.g. Tokyo">
-                <small class="host-desc">Results are shown in this timezone.</small>
-            </div>
+    <div style="display: flex; gap: 10px;">
+        <div style="flex:1">
+            <label>Date</label>
+            <input type="date" id="dateInput" value="2024-05-20">
         </div>
-
-        <label>Team Locations (Comma Separated)</label>
-        <textarea id="cityInput">London, Bengaluru, Tokyo, New York</textarea>
-        
-        <div id="status-log"></div>
-
-        <button onclick="runSimulation()" id="btn">Find Best Times</button>
-        <div style="margin-top:10px; text-align:right;">
-             <small><a href="#" onclick="checkHealth()">Check Server Status</a></small>
+        <div style="flex:1">
+            <label>Host City</label>
+            <input type="text" id="hostInput" value="New York">
         </div>
     </div>
 
+    <label>Team Cities</label>
+    <textarea id="cityInput">London, Tokyo, Bengaluru</textarea>
+
+    <button onclick="run()">Find Best Times</button>
     <div id="results"></div>
+</div>
 
-    <script>
-        async function checkHealth() {
-            try {
-                const res = await fetch('/api/health');
-                const data = await res.json();
-                alert(`STATUS: ${data.status}\nENV: ${data.env}`);
-            } catch(e) { alert("Server Offline"); }
-        }
+<script>
+    async function run() {
+        const out = document.getElementById('results');
+        out.innerHTML = "Processing...";
+        out.style.display = "block";
 
-        async function runSimulation() {
-            const btn = document.getElementById('btn');
-            const log = document.getElementById('status-log');
-            const resBox = document.getElementById('results');
-            
-            btn.disabled = true;
-            btn.innerText = "Resolving Locations...";
-            resBox.style.display = 'none';
-            log.innerHTML = '';
+        try {
+            // Resolve Host
+            const hRes = await fetch('/api/resolve', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: document.getElementById('hostInput').value }) });
+            const hData = await hRes.json();
 
-            try {
-                // 1. Gather Inputs
-                const cities = document.getElementById('cityInput').value.split(',').map(s => s.trim()).filter(s => s);
-                const hostCity = document.getElementById('hostInput').value.trim();
-                const viewerCity = document.getElementById('viewerInput').value.trim();
-
-                // 2. Helper to Resolve One City
-                const resolveCity = async (name, label) => {
-                    try {
-                        const res = await fetch('/api/resolve', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ city: name })
-                        });
-                        const data = await res.json();
-                        if (res.ok) {
-                            log.innerHTML += `<div class="log-ok">✓ ${label}: ${data.resolved_name} (${data.timezone_id})</div>`;
-                            return data.timezone_id;
-                        } else {
-                            throw new Error(data.error);
-                        }
-                    } catch (e) {
-                        log.innerHTML += `<div class="log-err">✕ Failed ${label}: ${name}</div>`;
-                        throw e;
-                    }
-                };
-
-                // 3. Resolve Host & Viewer First
-                const hostID = await resolveCity(hostCity, "Host");
-                const viewerID = await resolveCity(viewerCity, "Viewer");
-
-                // 4. Resolve Team
-                const teamIDs = [];
-                for (const city of cities) {
-                    try {
-                        const id = await resolveCity(city, "Team");
-                        teamIDs.push(id);
-                    } catch(e) {} // Continue even if one fails
-                }
-
-                if (teamIDs.length === 0) throw new Error("No valid team locations found.");
-
-                // 5. CALL OPTIMIZE API
-                btn.innerText = "Calculating Schedule...";
-                
-                const optRes = await fetch('/api/optimize', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        date: document.getElementById('dateInput').value,
-                        timezones: teamIDs,
-                        host_timezone: hostID,      // <--- NEW
-                        viewer_timezone: viewerID   // <--- NEW (Renamed from optimize_for)
-                    })
-                });
-
-                const optData = await optRes.json();
-                if (!optRes.ok) throw new Error(optData.error || "Optimization Failed");
-
-                // 6. RENDER RESULTS
-                let output = `⚡ BEST MATCHES (Viewer Time: ${optData.viewer}):\n`;
-                output += `   Host Time: ${optData.host}\n\n`;
-                
-                if (optData.top_3.length === 0) {
-                    output += "⚠️ No viable times found where Host is available.\n";
-                }
-
-                optData.top_3.forEach((slot, i) => {
-                    output += `#${i+1} [ ${slot.display_time} ] Score: ${slot.score}\n`;
-                    if(slot.blockers && slot.blockers.length) {
-                        slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
-                    } else {
-                        output += `   ✨ Perfect Match\n`;
-                    }
-                    output += `\n`;
-                });
-
-                output += `--------------------------------\n`;
-                output += `RAW DATA:\n` + JSON.stringify(optData, null, 2);
-
-                resBox.innerText = output;
-                resBox.style.display = 'block';
-
-            } catch (err) {
-                resBox.innerText = "❌ ERROR:\n" + err.message;
-                resBox.style.display = 'block';
-                resBox.style.color = '#f87171';
-            } finally {
-                btn.innerText = "Find Best Times";
-                btn.disabled = false;
+            // Resolve Team
+            const cities = document.getElementById('cityInput').value.split(',').map(c => c.trim());
+            const teamIDs = [];
+            for (let c of cities) {
+                const r = await fetch('/api/resolve', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: c }) });
+                const d = await r.json();
+                teamIDs.push(d.timezone_id);
             }
-        }
-    </script>
+
+            // Optimize
+            const oRes = await fetch('/api/optimize', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    date: document.getElementById('dateInput').value,
+                    timezones: teamIDs,
+                    host_timezone: hData.timezone_id,
+                    scenario: document.getElementById('scenario').value
+                })
+            });
+            const data = await oRes.json();
+
+            let html = "⚡ TOP 3 RECOMMENDATIONS:\n\n";
+            data.top_3.forEach((s, i) => {
+                html += `#${i+1} [ ${s.display_time} ] Score: ${Math.round(s.score)}\n`;
+                html += `   (Penalty Tax: -${s.penalty})\n`;
+                s.blockers.forEach(b => html += `   ⚠️ ${b}\n`);
+                html += `\n`;
+            });
+            out.innerText = html;
+        } catch (e) { out.innerText = "Error: " + e.message; }
+    }
+</script>
+
 </body>
 </html>
