@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbit Engine Lab</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f4f5; color: #18181b; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 20px; }
+        h1 { margin-top: 0; font-size: 1.5rem; }
+        label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #e4e4e7; border-radius: 6px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px; box-sizing: border-box; }
+        textarea { height: 200px; }
+        button { background: #000; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        button:hover { opacity: 0.8; }
+        #results { white-space: pre-wrap; background: #18181b; color: #00ff9d; padding: 20px; border-radius: 8px; font-family: monospace; overflow-x: auto; display: none; }
+        .tag { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <span class="tag">ALGORITHM TESTER</span>
+        <h1>Orbit Intelligence Engine</h1>
+        <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">Modify the JSON below to test different team configurations and weights.</p>
+        
+        <label>Target Date (YYYY-MM-DD)</label>
+        <input type="date" id="dateInput" value="2023-11-01">
+
+        <label>Team Payload (JSON)</label>
+        <textarea id="jsonInput">
+[
+  { 
+    "name": "Ravi (India)", 
+    "offset": 5.5, 
+    "prefs": [] 
+  },
+  { 
+    "name": "Sarah (NYC)", 
+    "offset": -4, 
+    "prefs": [] 
+  },
+  { 
+    "name": "Chen (SF)", 
+    "offset": -7, 
+    "prefs": ["night_owl"] 
+  }
+]</textarea>
+        <button onclick="testEngine()" id="btn">Run Simulation</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        async function testEngine() {
+            const btn = document.getElementById('btn');
+            const resBox = document.getElementById('results');
+            
+            try {
+                btn.innerText = "Running...";
+                resBox.style.display = 'none';
+
+                const payload = {
+                    date: document.getElementById('dateInput').value,
+                    team: JSON.parse(document.getElementById('jsonInput').value)
+                };
+
+                // Determine URL (Local vs Vercel)
+                const apiUrl = window.location.hostname === 'localhost' 
+                    ? '/api/optimize' 
+                    : '/api/optimize'; 
+
+                const req = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await req.json();
+                
+                // Format output nicely
+                let output = `⚡ BEST MATCHES FOUND:\n\n`;
+                data.top_3.forEach((slot, i) => {
+                    const time = new Date(slot.utc).toISOString().split('T')[1].slice(0,5);
+                    output += `#${i+1} [${time} UTC] (Score: ${slot.score})\n`;
+                    if(slot.blockers.length) {
+                        slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
+                    } else {
+                        output += `   ✨ Perfect Match\n`;
+                    }
+                    output += `\n`;
+                });
+
+                output += `--------------------------------\n`;
+                output += `RAW RESPONSE:\n` + JSON.stringify(data, null, 2);
+
+                resBox.innerText = output;
+                resBox.style.display = 'block';
+
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                btn.innerText = "Run Simulation";
+            }
+        }
+    </script>
+</body>
+</html>
