@@ -54,40 +54,34 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         const localTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(localDate);
 
         let points = 0;
-        let reason = ""; // NEW FIELD
+        let reason = ""; 
 
         if (day === 0 || day === 6) { 
             points = INTERNAL_POINTS.IMPOSSIBLE; 
             reason = "Weekend"; 
             hasDealbreaker = true; 
         } else {
-            // WORK HOURS (9 to 5:30)
             if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) {
                 if (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) {
                     points = INTERNAL_POINTS.OKAY;
-                    reason = "Lunch"; // Specific Reason
+                    reason = "Lunch"; 
                 } else {
                     points = INTERNAL_POINTS.PERFECT;
                     reason = "Perfect";
                 }
             }
-            // SHOULDER HOURS (8-9am OR 5:30-6pm)
             else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) {
                 points = INTERNAL_POINTS.OKAY;
-                // Be specific: Is it morning or evening?
                 reason = (timeValue < 12) ? "Early" : "Late";
             }
-            // STRETCH (7-8am OR 6-8pm)
             else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) {
                 points = INTERNAL_POINTS.STRETCH; 
                 reason = "Hard Stretch";
             }
-            // PAINFUL (6-7am OR 8-10pm)
             else if ((timeValue >= HOURS.PAIN_START && timeValue < HOURS.STRETCH_START) || (timeValue >= HOURS.STRETCH_END && timeValue < HOURS.PAIN_END)) {
                 points = INTERNAL_POINTS.PAINFUL; 
                 reason = "Painful";
             }
-            // SLEEP
             else {
                 points = INTERNAL_POINTS.IMPOSSIBLE; 
                 reason = "Sleeping"; 
@@ -98,14 +92,13 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         totalScore += points; 
         maxScore += INTERNAL_POINTS.PERFECT;
         
-        // Show blocker if not perfect
         if (points < INTERNAL_POINTS.PERFECT) blockers.push(`${loc.timezone}: ${reason}`);
         
         breakdown.push({
             zone: loc.timezone,
             local_time: localTimeStr,
-            status: (points >= INTERNAL_POINTS.OKAY) ? "OK" : "Bad", // Generic status
-            reason: reason,  // <--- NEW SPECIFIC REASON
+            status: (points >= INTERNAL_POINTS.OKAY) ? "OK" : "Bad", 
+            reason: reason,  
             score: points
         });
     }
@@ -170,10 +163,36 @@ app.post('/api/optimize', (req, res) => {
         results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone));
     }
 
+    // --- TIE BREAKER LOGIC (NEW) ---
+    // Lower misery is better
+    const PENALTY = {
+        "Perfect": 0,
+        "Lunch": 1,      // Best bad option
+        "Early": 2,      // Manageable
+        "Late": 2,       // Manageable
+        "Hard Stretch": 5, // Avoid
+        "Painful": 10,   // Seriously avoid
+        "Weekend": 20,
+        "Sleeping": 50
+    };
+
+    const getMisery = (slot) => {
+        // Sum up all the pain points for the team in this slot
+        return slot.breakdown.reduce((sum, p) => sum + (PENALTY[p.reason] || 0), 0);
+    };
+
+    results.sort((a, b) => {
+        // 1. Primary Sort: High Score wins
+        if (b.score !== a.score) return b.score - a.score; 
+        
+        // 2. Secondary Sort: Low Misery wins
+        return getMisery(a) - getMisery(b); 
+    });
+
     res.json({ 
         host: hostZone,
         viewer: viewerZone,
-        top_3: results.sort((a, b) => b.score - a.score).filter(r => r.status !== 'red').slice(0, 3), 
+        top_3: results.filter(r => r.status !== 'red').slice(0, 3), 
         all_slots: results 
     });
 });
