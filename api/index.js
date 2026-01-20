@@ -2,11 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-// Robust CORS to allow local file testing
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST']
-}));
+app.use(cors()); // Allows your HTML file to talk to this server
 app.use(express.json());
 
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
@@ -24,11 +20,7 @@ const SCENARIOS = {
     "gold_standard": { hostMode: 'strict', weight: 18 }
 };
 
-// Simple route to check if server is alive
-app.get('/api/health', (req, res) => {
-    res.json({ status: "Online", time: new Date().toISOString() });
-});
-
+// Helper: Get Offset
 function getOffsetInHours(timeZone, dateStr) {
     try {
         const date = new Date(dateStr + "T12:00:00Z");
@@ -37,22 +29,16 @@ function getOffsetInHours(timeZone, dateStr) {
         const val = parts.find(p => p.type === "timeZoneName").value.replace("GMT", "").replace("UTC", "");
         const [h, m] = val.split(":").map(Number);
         return h + (h < 0 ? -(m / 60 || 0) : (m / 60 || 0));
-    } catch (e) { return null; }
+    } catch (e) { return 0; }
 }
 
+// THE CALCULATION ENGINE
 function calculateSlot(utc, locations, hostOffset, viewerZone, config) {
-    let totalHappiness = 0, miseryIndex = 0, blockers = [], hasDealbreaker = false, breakdown = [];
-    
+    let totalHappiness = 0, miseryIndex = 0, blockers = [], breakdown = [], hasDealbreaker = false;
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
-    const hDay = hostDate.getUTCDay();
 
-    if (hDay === 0 || hDay === 6) hasDealbreaker = true;
-    else if (config.hostMode === 'strict') {
-        if (hTime < HOURS.WORK_START || hTime >= HOURS.WORK_END) hasDealbreaker = true;
-    } else {
-        if (hTime < HOURS.PAIN_START || hTime >= HOURS.PAIN_END) hasDealbreaker = true;
-    }
+    if (config.hostMode === 'strict' && (hTime < HOURS.WORK_START || hTime >= HOURS.WORK_END)) hasDealbreaker = true;
 
     for (const loc of locations) {
         const localDate = new Date(utc + (loc.offsetVal * 3600000));
@@ -63,38 +49,45 @@ function calculateSlot(utc, locations, hostOffset, viewerZone, config) {
         else if (time >= HOURS.WORK_START && time < HOURS.WORK_END) {
             if (time >= HOURS.LUNCH_START && time < HOURS.LUNCH_END) { p = POINTS.LUNCH; r = "Lunch"; }
             else { p = POINTS.PERFECT; r = "Perfect"; }
-        }
-        else if (time >= 8 && time < 18) { p = POINTS.SHOULDER; r = (time < 12) ? "Early" : "Late"; }
-        else if (time >= 7 && time < 20) { p = POINTS.STRETCH; r = "Hard Stretch"; }
-        else if (time >= 6 && time < 22) { p = POINTS.PAINFUL; r = "Painful"; }
+        } else if (time >= 6 && time < 22) { p = POINTS.PAINFUL; r = "Painful"; }
         else { p = POINTS.IMPOSSIBLE; r = "Sleeping"; hasDealbreaker = true; }
 
         totalHappiness += p;
         miseryIndex += (MISERY[r] || 0);
-        if (p < POINTS.PERFECT) blockers.push(`${loc.timezone}: ${r}`);
-
-        breakdown.push({
-            zone: loc.timezone,
-            local_time: new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(localDate),
-            score: p
-        });
+        breakdown.push({ zone: loc.timezone, local_time: new Intl.DateTimeFormat("en-US", { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: "UTC" }).format(localDate), score: p });
     }
 
     const penalty = miseryIndex * config.weight;
-    const finalScore = totalHappiness - penalty;
-
     return {
-        utc,
-        display_time: new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc)),
-        fairness_score: finalScore,
-        happiness_score: totalHappiness,
+        display_time: new Intl.DateTimeFormat("en-US", { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: viewerZone }).format(new Date(utc)),
+        fairness_score: totalHappiness - penalty,
         conflict_penalty: penalty,
-        status: hasDealbreaker ? "red" : (finalScore > 100 ? "green" : "yellow"),
-        blockers: [...new Set(blockers)],
+        status: hasDealbreaker ? "red" : "green",
         breakdown
     };
 }
 
+// 1. RESOLVE CITIES (SERVER-SIDE)
+app.post('/api/resolve-team', async (req, res) => {
+    try {
+        const { cities } = req.body;
+        const results = [];
+        for (let city of cities) {
+            const gRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`);
+            const gData = await gRes.json();
+            if (gData.length > 0) {
+                const tRes = await fetch(`https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${gData[0].lat}&lng=${gData[0].lon}`);
+                const tData = await tRes.json();
+                results.push(tData.zoneName);
+                // Artificial delay to prevent 429 API Limit
+                await new Promise(r => setTimeout(r, 1100)); 
+            }
+        }
+        res.json({ timezones: results });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 2. OPTIMIZE
 app.post('/api/optimize', (req, res) => {
     const { date, timezones, optimize_for, scenario } = req.body;
     const config = SCENARIOS[scenario] || SCENARIOS.peer_sync;
@@ -106,26 +99,8 @@ app.post('/api/optimize', (req, res) => {
     for (let i = 0; i < 24; i++) {
         results.push(calculateSlot(startUTC + (i * 3600000), locations, hostOffset, optimize_for, config));
     }
-
     results.sort((a, b) => b.fairness_score - a.fairness_score);
     res.json({ top_3: results.filter(r => r.status !== 'red').slice(0, 3) });
 });
 
-app.post('/api/resolve', async (req, res) => {
-    try {
-        const { city } = req.body;
-        const gRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${city}`);
-        const gData = await gRes.json();
-        if (!gData.length) return res.status(404).json({ error: "City not found" });
-        
-        const tRes = await fetch(`https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${gData[0].lat}&lng=${gData[0].lon}`);
-        const tData = await tRes.json();
-        res.json({ timezone_id: tData.zoneName });
-    } catch(e) { res.status(500).json({ error: "Location resolution failed" }); }
-});
-
-const PORT = 3000;
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Orbit Engine Ready!`);
-    console.log(`Endpoint: http://localhost:${PORT}`);
-});
+app.listen(3000, () => console.log('🚀 Server running on http://localhost:3000'));
