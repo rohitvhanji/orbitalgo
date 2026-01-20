@@ -7,7 +7,7 @@ app.use(express.json());
 
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
 
-// --- 1. UPDATED HUMAN BOUNDARIES ---
+// --- 1. STRICT HUMAN BOUNDARIES ---
 const HOURS = { 
     WORK_START: 9,      // 9:00 AM (100 pts)
     WORK_END: 17.5,     // 5:30 PM
@@ -17,8 +17,8 @@ const HOURS = {
     SHOULDER_END: 19,   // 7:00 PM
     STRETCH_START: 7.5, // 7:30 AM (40 pts)
     STRETCH_END: 21,    // 9:00 PM
-    PAIN_START: 7,      // 7:00 AM (10 pts) - NO-GO BEFORE THIS
-    PAIN_END: 22.5      // 10:30 PM - NO-GO AFTER THIS
+    PAIN_START: 7,      // 7:00 AM (10 pts) - ABSOLUTE START
+    PAIN_END: 22.5      // 10:30 PM - ABSOLUTE END
 };
 
 const INTERNAL_POINTS = { PERFECT: 100, OKAY: 70, STRETCH: 40, PAINFUL: 10, IMPOSSIBLE: -100 };
@@ -59,15 +59,15 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
     const hostDateLocal = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDateLocal.getUTCDay();
     
-    // Weekend check
-    if (hostDay === 0 || hostDay === 6) return { host_time: timeFormatter(hostZone).format(dateObj), total_score: -999, status: "red", blockers: ["Weekend"] };
+    if (hostDay === 0 || hostDay === 6) {
+        return { host_time: timeFormatter(hostZone).format(dateObj), total_score: -999, status: "red", blockers: ["Weekend"] };
+    }
 
-    // Strict 9-5 vs Flexible check
     if (policy.hostStrict) {
         if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) 
             return { host_time: timeFormatter(hostZone).format(dateObj), total_score: -999, status: "red", blockers: ["Host Veto: 9-5"] };
     } else {
-        // Sleep Veto (Non-negotiable 7am - 10:30pm)
+        // NON-NEGOTIABLE SLEEP BOUNDARY (Before 7am or after 10:30pm)
         if (hostTime < HOURS.PAIN_START || hostTime >= HOURS.PAIN_END) 
             return { host_time: timeFormatter(hostZone).format(dateObj), total_score: -999, status: "red", blockers: ["Host Sleep Veto"] };
     }
@@ -81,28 +81,38 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
         
         let p = 0, m = 0, note = "";
 
-        if (localDay === 0 || localDay === 6) { p = INTERNAL_POINTS.IMPOSSIBLE; m = MISERY_UNITS.Sleeping; hasDealbreaker = true; note = "Weekend"; }
-        // Core Work Hours
+        if (localDay === 0 || localDay === 6) { 
+            p = INTERNAL_POINTS.IMPOSSIBLE; m = MISERY_UNITS.Sleeping; hasDealbreaker = true; note = "Weekend"; 
+        } 
+        // 1. Core Work Hours
         else if (localTime >= HOURS.WORK_START && localTime < HOURS.WORK_END) {
             if (localTime >= HOURS.LUNCH_START && localTime < HOURS.LUNCH_END) { p = INTERNAL_POINTS.OKAY; m = MISERY_UNITS.Lunch; note = "Lunch"; }
             else { p = INTERNAL_POINTS.PERFECT; m = MISERY_UNITS.Perfect; }
         }
-        // Shoulder (8am or 6pm)
-        else if (localTime >= HOURS.SHOULDER_START && localTime < HOURS.SHOULDER_END) { p = INTERNAL_POINTS.OKAY; m = MISERY_UNITS.Shoulder; note = "Shoulder"; }
-        // Stretch (7:30am or 8pm)
-        else if (localTime >= HOURS.STRETCH_START && localTime < HOURS.STRETCH_END) { p = INTERNAL_POINTS.STRETCH; m = MISERY_UNITS.Stretch; note = "Stretch"; }
-        // Painful (7:00am or 9pm+)
-        else if (localTime >= HOURS.PAIN_START && localTime < HOURS.PAIN_END) { p = INTERNAL_POINTS.PAINFUL; m = MISERY_UNITS.Painful; note = "Painful"; }
-        // SLEEP
-        else { p = INTERNAL_POINTS.IMPOSSIBLE; m = MISERY_UNITS.Sleeping; hasDealbreaker = true; note = "Sleep"; }
+        // 2. Shoulder Hours
+        else if (localTime >= HOURS.SHOULDER_START && localTime < HOURS.SHOULDER_END) { 
+            p = INTERNAL_POINTS.OKAY; m = MISERY_UNITS.Shoulder; note = "Shoulder"; 
+        }
+        // 3. Stretch Hours
+        else if (localTime >= HOURS.STRETCH_START && localTime < HOURS.STRETCH_END) { 
+            p = INTERNAL_POINTS.STRETCH; m = MISERY_UNITS.Stretch; note = "Stretch"; 
+        }
+        // 4. Painful Hours (Starts at 7:00 AM)
+        else if (localTime >= HOURS.PAIN_START && localTime < HOURS.PAIN_END) { 
+            p = INTERNAL_POINTS.PAINFUL; m = MISERY_UNITS.Painful; note = "Painful"; 
+        }
+        // 5. Sleep (Veto)
+        else { 
+            p = INTERNAL_POINTS.IMPOSSIBLE; m = MISERY_UNITS.Sleeping; hasDealbreaker = true; note = "Sleep"; 
+        }
 
         totalHappiness += p;
         totalMisery += m;
         if (note) blockers.push(`${loc.timezone}: ${note}`);
     }
 
-    const weightedMisery = totalMisery * policy.weight;
-    const finalScore = totalHappiness - weightedMisery;
+    const miseryScore = totalMisery * policy.weight;
+    const finalScore = totalHappiness - miseryScore;
 
     return {
         viewer_time: timeFormatter(viewerZone).format(dateObj),
@@ -115,6 +125,8 @@ function calculateSlotScore(utc, locations, hostOffset, viewerOffset, hostZone, 
         blockers
     };
 }
+
+// --- ROUTES ---
 
 app.post('/api/optimize', (req, res) => {
     const { date, timezones, host_timezone, viewer_timezone, scenario } = req.body;
@@ -131,6 +143,7 @@ app.post('/api/optimize', (req, res) => {
         results.push(calculateSlotScore(startUTC + (i * 3600000), locations, hOffset, vOffset, host_timezone, viewer_timezone, policy));
     }
 
+    // Return all 24 rows, sorted by the highest total_score
     const sorted_results = results.sort((a, b) => b.total_score - a.total_score);
 
     res.json({ 
@@ -139,4 +152,4 @@ app.post('/api/optimize', (req, res) => {
     });
 });
 
-app.listen(3000);
+app.listen(3000, () => console.log('🚀 Orbit Server: Port 3000'));
