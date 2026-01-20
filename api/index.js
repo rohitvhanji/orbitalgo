@@ -34,8 +34,6 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDate.getUTCDay();
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
-    
-    // Simple format for host time
     const hostTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(hostDate);
 
     if (hostDay === 0 || hostDay === 6) {
@@ -55,43 +53,64 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         
         const localTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(localDate);
 
-        let points = 0, statusLabel = "";
+        let points = 0;
+        let reason = ""; // NEW FIELD
 
         if (day === 0 || day === 6) { 
-            points = INTERNAL_POINTS.IMPOSSIBLE; statusLabel = "Weekend"; hasDealbreaker = true; 
+            points = INTERNAL_POINTS.IMPOSSIBLE; 
+            reason = "Weekend"; 
+            hasDealbreaker = true; 
         } else {
+            // WORK HOURS (9 to 5:30)
             if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) {
-                points = (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) ? INTERNAL_POINTS.OKAY : INTERNAL_POINTS.PERFECT;
-                statusLabel = (points === INTERNAL_POINTS.PERFECT) ? "Perfect" : "Lunch";
+                if (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) {
+                    points = INTERNAL_POINTS.OKAY;
+                    reason = "Lunch"; // Specific Reason
+                } else {
+                    points = INTERNAL_POINTS.PERFECT;
+                    reason = "Perfect";
+                }
             }
+            // SHOULDER HOURS (8-9am OR 5:30-6pm)
             else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) {
-                points = INTERNAL_POINTS.OKAY; statusLabel = "Okay";
+                points = INTERNAL_POINTS.OKAY;
+                // Be specific: Is it morning or evening?
+                reason = (timeValue < 12) ? "Early" : "Late";
             }
+            // STRETCH (7-8am OR 6-8pm)
             else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) {
-                points = INTERNAL_POINTS.STRETCH; statusLabel = "Hard";
+                points = INTERNAL_POINTS.STRETCH; 
+                reason = "Hard Stretch";
             }
+            // PAINFUL (6-7am OR 8-10pm)
             else if ((timeValue >= HOURS.PAIN_START && timeValue < HOURS.STRETCH_START) || (timeValue >= HOURS.STRETCH_END && timeValue < HOURS.PAIN_END)) {
-                points = INTERNAL_POINTS.PAINFUL; statusLabel = "Painful";
+                points = INTERNAL_POINTS.PAINFUL; 
+                reason = "Painful";
             }
+            // SLEEP
             else {
-                points = INTERNAL_POINTS.IMPOSSIBLE; statusLabel = "Sleeping"; hasDealbreaker = true;
+                points = INTERNAL_POINTS.IMPOSSIBLE; 
+                reason = "Sleeping"; 
+                hasDealbreaker = true;
             }
         }
         
         totalScore += points; 
         maxScore += INTERNAL_POINTS.PERFECT;
         
-        if (points < INTERNAL_POINTS.OKAY) blockers.push(`${loc.timezone}: ${statusLabel}`);
+        // Show blocker if not perfect
+        if (points < INTERNAL_POINTS.PERFECT) blockers.push(`${loc.timezone}: ${reason}`);
         
         breakdown.push({
             zone: loc.timezone,
             local_time: localTimeStr,
-            status: statusLabel
+            status: (points >= INTERNAL_POINTS.OKAY) ? "OK" : "Bad", // Generic status
+            reason: reason,  // <--- NEW SPECIFIC REASON
+            score: points
         });
     }
 
     const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
-    
     let displayTime = "Invalid";
     try {
         displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
@@ -122,7 +141,6 @@ app.post('/api/resolve', async (req, res) => {
 });
 
 app.post('/api/optimize', (req, res) => {
-    // PURE: Receives array of strings (Timezone IDs)
     const { date, timezones, optimize_for, host_timezone } = req.body;
     
     if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
@@ -135,7 +153,6 @@ app.post('/api/optimize', (req, res) => {
 
     const locations = [], errors = [];
     
-    // We expect simple strings now: ["Asia/Tokyo", "Europe/London"]
     for (const tz of timezones) {
         const off = getOffsetInHours(tz, date);
         if (off === null) errors.push(tz);
@@ -144,7 +161,6 @@ app.post('/api/optimize', (req, res) => {
     
     if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
 
-    // Start at Host Midnight
     const utcMidnight = new Date(date + "T00:00:00Z").getTime();
     const startUTC = utcMidnight - (hostOffset * 3600000); 
     
