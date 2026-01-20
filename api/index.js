@@ -1,106 +1,157 @@
+// api/index.js
 const express = require('express');
 const cors = require('cors');
+
+// Initialize Express
 const app = express();
 
-app.use(cors()); // Allows your HTML file to talk to this server
+// Middleware
+app.use(cors());
 app.use(express.json());
 
+// --- CONFIGURATION ---
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
+const INTERNAL_POINTS = { PERFECT: 100, OKAY: 70, STRETCH: 40, PAINFUL: 10, IMPOSSIBLE: -100 };
+const HOURS = { WORK_START: 9, WORK_END: 17.5, LUNCH_START: 12, LUNCH_END: 13.5, SHOULDER_START: 8, SHOULDER_END: 18, STRETCH_START: 7, STRETCH_END: 20, PAIN_START: 6, PAIN_END: 22 };
 
-const POINTS = { PERFECT: 100, LUNCH: 75, SHOULDER: 65, STRETCH: 40, PAINFUL: 10, IMPOSSIBLE: -100 };
-const MISERY = { "Perfect": 0, "Lunch": 1, "Early": 2, "Late": 2, "Hard Stretch": 5, "Painful": 10, "Weekend": 20, "Sleeping": 50 };
-const HOURS = { WORK_START: 9, WORK_END: 17.5, LUNCH_START: 12, LUNCH_END: 13.5, PAIN_START: 6, PAIN_END: 22 };
-
-const SCENARIOS = {
-    "peer_sync": { hostMode: 'flexible', weight: 12 },
-    "client_meeting": { hostMode: 'strict', weight: 12 },
-    "all_hands": { hostMode: 'flexible', weight: 7 },
-    "urgent_briefing": { hostMode: 'strict', weight: 7 },
-    "culture_chat": { hostMode: 'flexible', weight: 18 },
-    "gold_standard": { hostMode: 'strict', weight: 18 }
-};
-
-// Helper: Get Offset
-function getOffsetInHours(timeZone, dateStr) {
-    try {
+// --- LOGIC HELPERS ---
+function getOffsetInHours(timeZone, dateStr)
+{
+    try
+    {
         const date = new Date(dateStr + "T12:00:00Z");
         const format = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" });
         const parts = format.formatToParts(date);
         const val = parts.find(p => p.type === "timeZoneName").value.replace("GMT", "").replace("UTC", "");
+        if (!val) return 0;
         const [h, m] = val.split(":").map(Number);
         return h + (h < 0 ? -(m / 60 || 0) : (m / 60 || 0));
-    } catch (e) { return 0; }
+    } catch (e) { return null; }
 }
 
-// THE CALCULATION ENGINE
-function calculateSlot(utc, locations, hostOffset, viewerZone, config) {
-    let totalHappiness = 0, miseryIndex = 0, blockers = [], breakdown = [], hasDealbreaker = false;
+// UPDATE: Accepts hostOffset to check Host availability first
+function calculateSlotScore(utc, locations, hostOffset, viewerZone)
+{
+    // --- 1. STRICT HOST CHECK ---
     const hostDate = new Date(utc + (hostOffset * 3600000));
-    const hTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
+    const hostDay = hostDate.getUTCDay();
+    const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
 
-    if (config.hostMode === 'strict' && (hTime < HOURS.WORK_START || hTime >= HOURS.WORK_END)) hasDealbreaker = true;
+    let displayTime = "Invalid";
+    try {
+        displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
+    } catch (e) { displayTime = "Invalid Zone"; }
 
-    for (const loc of locations) {
-        const localDate = new Date(utc + (loc.offsetVal * 3600000));
-        const time = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
-        let p = 0, r = "";
-
-        if (localDate.getUTCDay() === 0 || localDate.getUTCDay() === 6) { p = POINTS.IMPOSSIBLE; r = "Weekend"; hasDealbreaker = true; }
-        else if (time >= HOURS.WORK_START && time < HOURS.WORK_END) {
-            if (time >= HOURS.LUNCH_START && time < HOURS.LUNCH_END) { p = POINTS.LUNCH; r = "Lunch"; }
-            else { p = POINTS.PERFECT; r = "Perfect"; }
-        } else if (time >= 6 && time < 22) { p = POINTS.PAINFUL; r = "Painful"; }
-        else { p = POINTS.IMPOSSIBLE; r = "Sleeping"; hasDealbreaker = true; }
-
-        totalHappiness += p;
-        miseryIndex += (MISERY[r] || 0);
-        breakdown.push({ zone: loc.timezone, local_time: new Intl.DateTimeFormat("en-US", { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: "UTC" }).format(localDate), score: p });
+    // RULE: Host cannot meet on Weekends or outside 9:00 - 17:30
+    if (hostDay === 0 || hostDay === 6) {
+        return { utc, display_time: displayTime, score: -999, status: "red", blockers: ["Host: Weekend"] };
+    }
+    if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) {
+        return { utc, display_time: displayTime, score: -999, status: "red", blockers: ["Host: Outside Work Hours"] };
     }
 
-    const penalty = miseryIndex * config.weight;
-    return {
-        display_time: new Intl.DateTimeFormat("en-US", { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: viewerZone }).format(new Date(utc)),
-        fairness_score: totalHappiness - penalty,
-        conflict_penalty: penalty,
-        status: hasDealbreaker ? "red" : "green",
-        breakdown
-    };
+    // --- 2. TEAM SCORING ---
+    let totalScore = 0, maxScore = 0, blockers = [], hasDealbreaker = false;
+
+    for (const loc of locations)
+    {
+        const localDate = new Date(utc + (loc.offsetVal * 3600000));
+        const day = localDate.getUTCDay();
+        const timeValue = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
+        let points = 0, note = "";
+
+        if (day === 0 || day === 6) { points = INTERNAL_POINTS.IMPOSSIBLE; note = "Weekend"; hasDealbreaker = true; }
+        else
+        {
+            if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) points = (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) ? INTERNAL_POINTS.OKAY : INTERNAL_POINTS.PERFECT;
+            else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) points = INTERNAL_POINTS.OKAY;
+            else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) { points = INTERNAL_POINTS.STRETCH; note = "Hard"; }
+            else if ((timeValue >= HOURS.PAIN_START && timeValue < HOURS.STRETCH_START) || (timeValue >= HOURS.STRETCH_END && timeValue < HOURS.PAIN_END)) { points = INTERNAL_POINTS.PAINFUL; note = "Painful"; }
+            else { points = INTERNAL_POINTS.IMPOSSIBLE; note = "Sleeping"; hasDealbreaker = true; }
+        }
+        totalScore += points; maxScore += INTERNAL_POINTS.PERFECT;
+        if (note) blockers.push(`${loc.timezone}: ${note}`);
+    }
+
+    const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
+
+    return { utc, display_time: displayTime, score: totalScore, status, blockers };
 }
 
-// 1. RESOLVE CITIES (SERVER-SIDE)
-app.post('/api/resolve-team', async (req, res) => {
-    try {
-        const { cities } = req.body;
-        const results = [];
-        for (let city of cities) {
-            const gRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`);
-            const gData = await gRes.json();
-            if (gData.length > 0) {
-                const tRes = await fetch(`https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${gData[0].lat}&lng=${gData[0].lon}`);
-                const tData = await tRes.json();
-                results.push(tData.zoneName);
-                // Artificial delay to prevent 429 API Limit
-                await new Promise(r => setTimeout(r, 1100)); 
-            }
-        }
-        res.json({ timezones: results });
+// --- ROUTES ---
+
+// 1. Health Check
+app.get('/api/health', (req, res) =>
+{
+    res.json({ status: "Orbit Engine Online", env: process.env.VERCEL ? "Vercel" : "Standard Server" });
+});
+
+// 2. Resolve API
+app.post('/api/resolve', async (req, res) =>
+{
+    const { city } = req.body;
+    if (!city) return res.status(400).json({ error: "Missing city" });
+    try
+    {
+        const gRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`, { headers: { 'User-Agent': 'Orbit/1.0' } });
+        const gData = await gRes.json();
+        if (!gData.length) return res.status(404).json({ error: "City not found" });
+
+        const tRes = await fetch(`https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${gData[0].lat}&lng=${gData[0].lon}`);
+        const tData = await tRes.json();
+
+        res.json({ status: "OK", timezone_id: tData.zoneName, resolved_name: gData[0].display_name });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 2. OPTIMIZE
-app.post('/api/optimize', (req, res) => {
-    const { date, timezones, optimize_for, scenario } = req.body;
-    const config = SCENARIOS[scenario] || SCENARIOS.peer_sync;
-    const hostOffset = getOffsetInHours(optimize_for, date);
-    const locations = timezones.map(tz => ({ timezone: tz, offsetVal: getOffsetInHours(tz, date) }));
+// 3. Optimize API
+app.post('/api/optimize', (req, res) =>
+{
+    const { date, timezones, optimize_for, host_timezone } = req.body;
+    if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
 
-    const startUTC = new Date(date + "T00:00:00Z").getTime() - (hostOffset * 3600000); 
-    const results = [];
-    for (let i = 0; i < 24; i++) {
-        results.push(calculateSlot(startUTC + (i * 3600000), locations, hostOffset, optimize_for, config));
+    // Determine Host (Gatekeeper) & Viewer (Display)
+    const hostZone = host_timezone || optimize_for || "UTC";
+    const viewerZone = optimize_for || "UTC";
+
+    // Pre-calculate Host Offset
+    const hostOffset = getOffsetInHours(hostZone, date);
+    if (hostOffset === null) return res.status(400).json({ error: "Invalid Host Timezone" });
+
+    const locations = [], errors = [];
+    for (const tz of timezones)
+    {
+        const off = getOffsetInHours(tz, date);
+        if (off === null) errors.push(tz);
+        else locations.push({ timezone: tz, offsetVal: off });
     }
-    results.sort((a, b) => b.fairness_score - a.fairness_score);
-    res.json({ top_3: results.filter(r => r.status !== 'red').slice(0, 3) });
+    if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
+
+    const results = [];
+    const startUTC = new Date(date + "T00:00:00Z").getTime();
+    
+    // UPDATE: Loop 24 times (1 hour intervals)
+    for (let i = 0; i < 24; i++) {
+        const slotUTC = startUTC + (i * 60 * 60000); // 60 mins
+        results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone));
+    }
+
+    res.json({ 
+        host: hostZone,
+        viewer: viewerZone,
+        top_3: results.sort((a, b) => b.score - a.score).filter(r => r.status !== 'red').slice(0, 3), 
+        all_slots: results 
+    });
 });
 
-app.listen(3000, () => console.log('🚀 Server running on http://localhost:3000'));
+
+// --- SERVER STARTUP ---
+// If running directly (node api/index.js), listen on port 3000
+if (require.main === module)
+{
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => console.log(`🚀 Orbit Server running on http://localhost:${PORT}`));
+}
+
+// Export for Vercel Serverless
+module.exports = app;
