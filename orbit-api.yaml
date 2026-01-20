@@ -1,0 +1,34 @@
+openapi: 3.0.3
+info:
+  title: Orbit Intelligence API
+  version: 2.0.0
+servers:
+  - url: /api
+paths:
+  /resolve:
+    post:
+      summary: City -> Timezone ID
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                city: { type: string, example: "London" }
+      responses:
+        '200':
+          description: OK
+  /optimize:
+    post:
+      summary: Timezone IDs -> Best Slots
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date: { type: string, example: "2023-11-01" }
+                timezones: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Ranked Time Slots
