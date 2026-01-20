@@ -31,6 +31,9 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     let maxScore = 0;
     let blockers = [];
     let hasDealbreaker = false;
+    
+    // NEW: Array to store status of every single location for this specific slot
+    let breakdown = []; 
 
     // --- 1. HOST CHECK ---
     const hostDate = new Date(utc + (hostOffset * 3600000));
@@ -38,8 +41,7 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
 
     const hostTimeStr = new Intl.DateTimeFormat("en-US", { 
-        timeZone: "UTC", 
-        hour: 'numeric', minute: '2-digit', hour12: true 
+        timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true 
     }).format(hostDate);
 
     if (hostDay === 0 || hostDay === 6) {
@@ -56,25 +58,47 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         const localDate = new Date(utc + (loc.offsetVal * 3600000));
         const day = localDate.getUTCDay();
         const timeValue = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
-        let points = 0, note = "";
+        
+        // Format Local Time for Debugging
+        const localTimeStr = new Intl.DateTimeFormat("en-US", { 
+            timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true 
+        }).format(localDate);
+
+        let points = 0, statusLabel = "";
 
         if (day === 0 || day === 6) { 
-            points = INTERNAL_POINTS.IMPOSSIBLE; note = "Weekend"; hasDealbreaker = true; 
+            points = INTERNAL_POINTS.IMPOSSIBLE; statusLabel = "Weekend"; hasDealbreaker = true; 
         } else {
-            if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) 
+            if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) {
                 points = (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) ? INTERNAL_POINTS.OKAY : INTERNAL_POINTS.PERFECT;
-            else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) 
-                points = INTERNAL_POINTS.OKAY;
-            else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) 
-                { points = INTERNAL_POINTS.STRETCH; note = "Hard"; }
-            else if ((timeValue >= HOURS.PAIN_START && timeValue < HOURS.STRETCH_START) || (timeValue >= HOURS.STRETCH_END && timeValue < HOURS.PAIN_END)) 
-                { points = INTERNAL_POINTS.PAINFUL; note = "Painful"; }
-            else 
-                { points = INTERNAL_POINTS.IMPOSSIBLE; note = "Sleeping"; hasDealbreaker = true; }
+                statusLabel = (points === INTERNAL_POINTS.PERFECT) ? "Perfect" : "Lunch";
+            }
+            else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) {
+                points = INTERNAL_POINTS.OKAY; statusLabel = "Okay";
+            }
+            else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) {
+                points = INTERNAL_POINTS.STRETCH; statusLabel = "Hard";
+            }
+            else if ((timeValue >= HOURS.PAIN_START && timeValue < HOURS.STRETCH_START) || (timeValue >= HOURS.STRETCH_END && timeValue < HOURS.PAIN_END)) {
+                points = INTERNAL_POINTS.PAINFUL; statusLabel = "Painful";
+            }
+            else {
+                points = INTERNAL_POINTS.IMPOSSIBLE; statusLabel = "Sleeping"; hasDealbreaker = true;
+            }
         }
+        
         totalScore += points; 
         maxScore += INTERNAL_POINTS.PERFECT;
-        if (note) blockers.push(`${loc.timezone}: ${note}`);
+        
+        if (points < INTERNAL_POINTS.OKAY) blockers.push(`${loc.timezone}: ${statusLabel}`);
+        
+        // ADD TO BREAKDOWN REPORT
+        breakdown.push({
+            city: loc.timezone,
+            local_time: localTimeStr,
+            status: statusLabel,
+            points: points
+        });
     }
 
     // --- 3. FINAL STATUS ---
@@ -85,7 +109,14 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
         displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
     } catch (e) { displayTime = "Invalid Zone"; }
 
-    return { utc, display_time: displayTime, score: totalScore, status, blockers };
+    return { 
+        utc, 
+        display_time: displayTime, 
+        score: totalScore, 
+        status, 
+        blockers,
+        breakdown // <--- SENT BACK TO FRONTEND
+    };
 }
 
 // --- ROUTES ---
@@ -131,16 +162,13 @@ app.post('/api/optimize', (req, res) => {
     if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
 
     // 4. RUN LOOP (24 Hours)
-    // FIX: We align the start time to the HOST'S MIDNIGHT, not UTC Midnight.
-    // Logic: UTC_Midnight - HostOffset = Host_Midnight
-    // Example: 00:00 UTC - (-5 hours NY) = 05:00 UTC (Which is 00:00 NY)
-    
+    // Start at Host Midnight
     const utcMidnight = new Date(date + "T00:00:00Z").getTime();
     const startUTC = utcMidnight - (hostOffset * 3600000); 
     
     const results = [];
     for (let i = 0; i < 24; i++) {
-        const slotUTC = startUTC + (i * 60 * 60000); // 60 min intervals
+        const slotUTC = startUTC + (i * 60 * 60000); 
         results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone));
     }
 
