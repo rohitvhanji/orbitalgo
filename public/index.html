@@ -3,30 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit Engine Lab</title>
+    <title>Orbit Intelligence Lab</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f4f5; color: #18181b; }
         .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 20px; }
         h1 { margin-top: 0; font-size: 1.5rem; }
         label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; }
-        input, textarea, select { width: 100%; padding: 10px; border: 1px solid #e4e4e7; border-radius: 6px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px; box-sizing: border-box; }
-        textarea { height: 150px; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #e4e4e7; border-radius: 6px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px; box-sizing: border-box; }
+        textarea { height: 80px; }
         button { background: #000; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; }
         button:hover { opacity: 0.8; }
+        button:disabled { background: #a1a1aa; cursor: not-allowed; }
+        
+        #status-log { margin-bottom: 15px; font-size: 0.85rem; color: #64748b; font-family: monospace; }
+        .log-ok { color: #10b981; }
+        .log-err { color: #ef4444; }
+
         #results { white-space: pre-wrap; background: #18181b; color: #00ff9d; padding: 20px; border-radius: 8px; font-family: monospace; overflow-x: auto; display: none; }
         .tag { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; margin-bottom: 15px; }
-        .status-green { color: #4ade80; }
-        .status-yellow { color: #facc15; }
-        .status-red { color: #f87171; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <span class="tag">ALGORITHM TESTER</span>
+        <span class="tag">SMART RESOLVER ACTIVE</span>
         <h1>Orbit Intelligence Engine</h1>
-        <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">
-            Test the new Timezone-based API.
+        <p style="color:#71717a; font-size:0.9rem;">
+            Enter city names below. We will auto-detect their timezones before running the algorithm.
         </p>
         
         <div style="display:flex; gap:10px;">
@@ -35,43 +38,103 @@
                 <input type="date" id="dateInput" value="2023-11-01">
             </div>
             <div style="flex:1">
-                <label>View Results In (Timezone)</label>
-                <input type="text" id="viewerZone" value="America/New_York" placeholder="e.g. Asia/Kolkata">
+                <label>My Location (For Display)</label>
+                <input type="text" id="viewerZone" value="America/New_York" placeholder="e.g. NYC">
             </div>
         </div>
 
-        <label>Timezones List (JSON Array)</label>
-        <textarea id="jsonInput">
-[
-  "Asia/Kolkata",
-  "America/New_York",
-  "Europe/London",
-  "Asia/Tokyo"
-]</textarea>
-        <button onclick="testEngine()" id="btn">Run Simulation</button>
+        <label>Team Locations (Comma Separated)</label>
+        <textarea id="cityInput">London, Bengaluru, New York, Tokyo</textarea>
+        
+        <div id="status-log"></div>
+
+        <button onclick="runSmartSimulation()" id="btn">Resolve Cities & Run</button>
     </div>
 
     <div id="results"></div>
 
     <script>
-        async function testEngine() {
-            const btn = document.getElementById('btn');
-            const resBox = document.getElementById('results');
-            
-            try {
-                btn.innerText = "Running...";
-                resBox.style.display = 'none';
+        // YOUR KEYS
+        const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
+        
+        // 1. HELPER: Convert "City Name" -> "Lat/Lon" (OpenStreetMap)
+        async function getGeo(city) {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (!data || data.length === 0) throw new Error(`City not found: ${city}`);
+            return { lat: data[0].lat, lon: data[0].lon, name: data[0].display_name };
+        }
 
-                // 1. Construct the Payload (Matching the new API signature)
+        // 2. HELPER: Convert "Lat/Lon" -> "Timezone ID" (TimezoneDB)
+        async function getTimezone(lat, lon) {
+            const url = `https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${lat}&lng=${lon}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.status !== 'OK') throw new Error(`Timezone lookup failed`);
+            return data.zoneName; // Returns "Asia/Kolkata"
+        }
+
+        // 3. MAIN FUNCTION
+        async function runSmartSimulation() {
+            const btn = document.getElementById('btn');
+            const log = document.getElementById('status-log');
+            const resBox = document.getElementById('results');
+            const cityText = document.getElementById('cityInput').value;
+            
+            // Reset UI
+            btn.disabled = true;
+            btn.innerText = "Resolving Locations...";
+            resBox.style.display = 'none';
+            log.innerHTML = '';
+
+            try {
+                // Step A: Parse Inputs
+                const rawCities = cityText.split(',').map(s => s.trim()).filter(s => s);
+                const viewerInput = document.getElementById('viewerZone').value;
+                
+                // Step B: Resolve Viewer Zone (Simple Logic)
+                // We do a quick lookup for the viewer too, just in case they typed "NYC"
+                let viewerZoneID = "UTC";
+                try {
+                    const vGeo = await getGeo(viewerInput);
+                    viewerZoneID = await getTimezone(vGeo.lat, vGeo.lon);
+                    log.innerHTML += `<div class="log-ok">✓ Viewer: ${viewerInput} → ${viewerZoneID}</div>`;
+                } catch(e) {
+                    log.innerHTML += `<div class="log-err">⚠ Viewer defaulting to UTC (Unknown city)</div>`;
+                }
+
+                // Step C: Resolve All Team Cities
+                const validTimezones = [];
+                
+                for (const city of rawCities) {
+                    try {
+                        // 1. Get Lat/Lon
+                        const geo = await getGeo(city);
+                        // 2. Get Timezone
+                        const tz = await getTimezone(geo.lat, geo.lon);
+                        
+                        validTimezones.push(tz);
+                        log.innerHTML += `<div class="log-ok">✓ Resolved: ${city} → ${tz}</div>`;
+                    } catch (err) {
+                        log.innerHTML += `<div class="log-err">✕ Failed: ${city} (${err.message})</div>`;
+                    }
+                    // Tiny pause to be nice to the API
+                    await new Promise(r => setTimeout(r, 600)); 
+                }
+
+                if (validTimezones.length === 0) throw new Error("No valid locations found.");
+
+                // Step D: Send to ORBIT ENGINE (Backend)
+                btn.innerText = "Calculating Best Times...";
+                
                 const payload = {
                     date: document.getElementById('dateInput').value,
-                    timezones: JSON.parse(document.getElementById('jsonInput').value),
-                    optimize_for: document.getElementById('viewerZone').value
+                    timezones: validTimezones,
+                    optimize_for: viewerZoneID
                 };
 
-                // 2. Call the API
                 const apiUrl = '/api/optimize'; 
-
                 const req = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -80,21 +143,15 @@
 
                 const data = await req.json();
 
-                if (!req.ok) {
-                    throw new Error(data.error || "API Error");
-                }
-                
-                // 3. Render Output
-                let output = `⚡ BEST MATCHES (Viewer Time: ${payload.optimize_for}):\n\n`;
+                // Step E: Display Results
+                let output = `⚡ BEST MATCHES (Viewer Time: ${viewerZoneID}):\n\n`;
                 
                 if (data.top_3.length === 0) {
                     output += "⚠️ No viable times found (Everything is Red/Impossible).\n";
                 }
 
                 data.top_3.forEach((slot, i) => {
-                    // Use the pre-calculated 'display_time' from the server
-                    output += `#${i+1} [ ${slot.display_time} ]  Score: ${slot.score}\n`;
-                    
+                    output += `#${i+1} [ ${slot.display_time} ]  Score: ${slot.score} (${slot.status})\n`;
                     if(slot.blockers.length) {
                         slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
                     } else {
@@ -112,9 +169,10 @@
             } catch (err) {
                 resBox.innerText = "❌ ERROR:\n" + err.message;
                 resBox.style.display = 'block';
-                resBox.style.color = '#f87171'; // Red text for error
+                resBox.style.color = '#f87171';
             } finally {
-                btn.innerText = "Run Simulation";
+                btn.innerText = "Resolve Cities & Run";
+                btn.disabled = false;
             }
         }
     </script>
