@@ -15,12 +15,11 @@
         .row { display: flex; gap: 15px; }
         .col { flex: 1; }
         button { background: #0f172a; color: white; width: 100%; padding: 16px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
-        button:disabled { opacity: 0.5; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
         #results { margin-top: 25px; display: none; padding-top: 20px; border-top: 2px dashed var(--border); }
         .slot { background: #0f172a; color: #f8fafc; padding: 18px; border-radius: 12px; margin-bottom: 12px; font-family: monospace; border-left: 4px solid var(--success); }
         .meta { color: #94a3b8; font-size: 0.8rem; display: block; }
         .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; border-top: 1px solid #334155; padding-top: 10px; }
-        .loading { font-style: italic; color: var(--primary); text-align: center; display: block; padding: 10px; }
     </style>
 </head>
 <body>
@@ -45,41 +44,60 @@
             <input type="date" id="date">
         </div>
         <div class="col">
-            <label>Host City</label>
+            <label>Host City (Your Location)</label>
             <input type="text" id="host" value="New York">
         </div>
     </div>
 
-    <label>Team Cities</label>
-    <textarea id="team" rows="2">London, Tokyo, Bengaluru</textarea>
+    <label>Team Member Cities</label>
+    <textarea id="team" rows="2" placeholder="London, Tokyo, Bengaluru">London, Tokyo, Bengaluru</textarea>
+
     <button onclick="calculate()" id="btn">Find Least Painful Times</button>
+    
     <div id="results"></div>
 </div>
 
 <script>
+    // Set today as default
     document.getElementById('date').valueAsDate = new Date();
-    const API = "http://localhost:3000/api";
+    
+    // FULL LOCALHOST URL
+    const API_BASE = "http://localhost:3000/api";
 
     async function calculate() {
         const resDiv = document.getElementById('results');
         const btn = document.getElementById('btn');
-        resDiv.innerHTML = "<span class='loading'>Analyzing global timezones...</span>";
+        
+        resDiv.innerHTML = "<div style='text-align:center; color: #2563eb;'><i>Checking connection & resolving cities...</i></div>";
         resDiv.style.display = "block";
         btn.disabled = true;
 
         try {
-            const hRes = await fetch(`${API}/resolve`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: document.getElementById('host').value }) });
+            // 1. Resolve Host
+            const hRes = await fetch(`${API_BASE}/resolve`, { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ city: document.getElementById('host').value }) 
+            });
+            if (!hRes.ok) throw new Error("Backend couldn't find your Host City.");
             const hData = await hRes.json();
             
+            // 2. Resolve Team
             const teamCities = document.getElementById('team').value.split(',').map(c => c.trim()).filter(c => c);
             const teamIDs = [hData.timezone_id];
+            
             for (let c of teamCities) {
-                const r = await fetch(`${API}/resolve`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: c }) });
+                const r = await fetch(`${API_BASE}/resolve`, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ city: c }) 
+                });
                 const d = await r.json();
                 if(d.timezone_id) teamIDs.push(d.timezone_id);
             }
 
-            const oRes = await fetch(`${API}/optimize`, {
+            // 3. Optimize
+            const oRes = await fetch(`${API_BASE}/optimize`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -91,19 +109,32 @@
             });
             const data = await oRes.json();
 
+            // 4. Render
             let html = "<b>TOP 3 RECOMMENDATIONS:</b><br><br>";
-            data.top_3.forEach((s, i) => {
-                html += `<div class="slot"><b>#${i+1} ${s.display_time}</b><span class="meta">Fairness Score: ${Math.round(s.fairness_score)} | Tax: -${s.conflict_penalty}</span>`;
-                html += `<div class="breakdown-grid">`;
-                s.breakdown.forEach(loc => {
-                    const dot = loc.score >= 100 ? '🟢' : (loc.score >= 65 ? '🟡' : '🔴');
-                    html += `<div style="font-size:0.75rem">${dot} ${loc.zone.split('/').pop()}: ${loc.local_time}</div>`;
+            if (!data.top_3.length) {
+                html += "No slots found. Try a more 'Flexible' scenario.";
+            } else {
+                data.top_3.forEach((s, i) => {
+                    html += `<div class="slot"><b>#${i+1} ${s.display_time}</b><span class="meta">Fairness: ${Math.round(s.fairness_score)} | Tax: -${s.conflict_penalty}</span>`;
+                    html += `<div class="breakdown-grid">`;
+                    s.breakdown.forEach(loc => {
+                        const dot = loc.score >= 100 ? '🟢' : (loc.score >= 65 ? '🟡' : '🔴');
+                        html += `<div style="font-size:0.75rem">${dot} ${loc.zone.split('/').pop().replace('_',' ')}: ${loc.local_time}</div>`;
+                    });
+                    html += `</div></div>`;
                 });
-                html += `</div></div>`;
-            });
+            }
             resDiv.innerHTML = html;
-        } catch (e) { resDiv.innerHTML = "<b style='color:red'>Error:</b> Server offline or API limit hit."; }
-        finally { btn.disabled = false; }
+
+        } catch (e) {
+            console.error(e);
+            resDiv.innerHTML = `<div style="color:var(--error); border:1px solid; padding:10px; border-radius:8px;">
+                <b>Connection Error:</b> ${e.message}<br>
+                <small>1. Is 'node index.js' running?<br>2. Check console (F12) for details.</small>
+            </div>`;
+        } finally {
+            btn.disabled = false;
+        }
     }
 </script>
 </body>
