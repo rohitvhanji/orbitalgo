@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit Intelligence Lab</title>
+    <title>Orbit Intelligence</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f4f5; color: #18181b; }
         .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 20px; }
@@ -26,10 +26,10 @@
 <body>
 
     <div class="card">
-        <span class="tag">SMART RESOLVER ACTIVE</span>
+        <span class="tag">MICROSERVICES ARCHITECTURE</span>
         <h1>Orbit Intelligence Engine</h1>
         <p style="color:#71717a; font-size:0.9rem;">
-            Enter city names below. We will auto-detect their timezones before running the algorithm.
+            Enter city names. The frontend chains API calls: Resolve -> Optimize.
         </p>
         
         <div style="display:flex; gap:10px;">
@@ -38,138 +38,92 @@
                 <input type="date" id="dateInput" value="2023-11-01">
             </div>
             <div style="flex:1">
-                <label>My Location (For Display)</label>
-                <input type="text" id="viewerZone" value="America/New_York" placeholder="e.g. NYC">
+                <label>View Results In (Timezone)</label>
+                <input type="text" id="viewerZone" value="America/New_York" placeholder="e.g. Asia/Kolkata">
             </div>
         </div>
 
         <label>Team Locations (Comma Separated)</label>
-        <textarea id="cityInput">London, Bengaluru, New York, Tokyo</textarea>
+        <textarea id="cityInput">London, Bengaluru, Tokyo, NYC</textarea>
         
         <div id="status-log"></div>
 
-        <button onclick="runSmartSimulation()" id="btn">Resolve Cities & Run</button>
+        <button onclick="runSimulation()" id="btn">Find Best Times</button>
     </div>
 
     <div id="results"></div>
 
     <script>
-        // YOUR API KEYS
-        const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
-        
-        // 1. HELPER: Convert "City Name" -> "Lat/Lon" (OpenStreetMap)
-        async function getGeo(city) {
-            // Using OSM for free geocoding
-            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            if (!data || data.length === 0) throw new Error(`City not found: ${city}`);
-            return { lat: data[0].lat, lon: data[0].lon, name: data[0].display_name };
-        }
-
-        // 2. HELPER: Convert "Lat/Lon" -> "Timezone ID" (TimezoneDB)
-        async function getTimezone(lat, lon) {
-            const url = `https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${lat}&lng=${lon}`;
-            const res = await fetch(url);
-            const data = await res.json();
-            if (data.status !== 'OK') throw new Error(`Timezone lookup failed`);
-            return data.zoneName; // Returns "Asia/Kolkata"
-        }
-
-        // 3. MAIN FUNCTION
-        async function runSmartSimulation() {
+        async function runSimulation() {
             const btn = document.getElementById('btn');
             const log = document.getElementById('status-log');
             const resBox = document.getElementById('results');
-            const cityText = document.getElementById('cityInput').value;
             
-            // Reset UI
             btn.disabled = true;
-            btn.innerText = "Resolving Locations...";
+            btn.innerText = "Processing...";
             resBox.style.display = 'none';
             log.innerHTML = '';
 
             try {
-                // Step A: Parse Inputs
-                const rawCities = cityText.split(',').map(s => s.trim()).filter(s => s);
-                const viewerInput = document.getElementById('viewerZone').value;
-                
-                // Step B: Resolve Viewer Zone
-                // (We do a quick lookup for the viewer too, just in case they typed "NYC")
-                let viewerZoneID = "UTC";
-                try {
-                    const vGeo = await getGeo(viewerInput);
-                    viewerZoneID = await getTimezone(vGeo.lat, vGeo.lon);
-                    log.innerHTML += `<div class="log-ok">✓ Viewer: ${viewerInput} → ${viewerZoneID}</div>`;
-                } catch(e) {
-                    log.innerHTML += `<div class="log-err">⚠ Viewer defaulting to UTC (Unknown city)</div>`;
-                }
+                const cities = document.getElementById('cityInput').value.split(',').map(s => s.trim()).filter(s => s);
+                const viewerZone = document.getElementById('viewerZone').value;
+                const resolvedIDs = [];
 
-                // Step C: Resolve All Team Cities
-                const validTimezones = [];
-                
-                for (const city of rawCities) {
+                // 1. CALL RESOLVE API (One by one to be polite to free APIs)
+                for (const city of cities) {
                     try {
-                        const geo = await getGeo(city);
-                        const tz = await getTimezone(geo.lat, geo.lon);
+                        const res = await fetch('/api/resolve', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ city })
+                        });
+                        const data = await res.json();
                         
-                        validTimezones.push(tz);
-                        log.innerHTML += `<div class="log-ok">✓ Resolved: ${city} → ${tz}</div>`;
-                    } catch (err) {
-                        log.innerHTML += `<div class="log-err">✕ Failed: ${city} (${err.message})</div>`;
+                        if (res.ok) {
+                            resolvedIDs.push(data.timezone_id);
+                            log.innerHTML += `<div class="log-ok">✓ Resolved: ${city} → ${data.timezone_id}</div>`;
+                        } else {
+                            throw new Error(data.error);
+                        }
+                    } catch (e) {
+                        log.innerHTML += `<div class="log-err">✕ Failed: ${city} (${e.message})</div>`;
                     }
-                    // Tiny pause to be nice to the API
-                    await new Promise(r => setTimeout(r, 600)); 
                 }
 
-                if (validTimezones.length === 0) throw new Error("No valid locations found.");
+                if (resolvedIDs.length === 0) throw new Error("No valid locations found.");
 
-                // Step D: Send to ORBIT ENGINE (Backend)
-                btn.innerText = "Calculating Best Times...";
+                // 2. CALL OPTIMIZE API
+                btn.innerText = "Calculating Schedule...";
                 
-                const payload = {
-                    date: document.getElementById('dateInput').value,
-                    timezones: validTimezones,
-                    optimize_for: viewerZoneID
-                };
-
-                const apiUrl = '/api/optimize'; 
-                const req = await fetch(apiUrl, {
+                const optRes = await fetch('/api/optimize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify({
+                        date: document.getElementById('dateInput').value,
+                        timezones: resolvedIDs,
+                        optimize_for: viewerZone
+                    })
                 });
 
-                const data = await req.json();
+                const optData = await optRes.json();
+                if (!optRes.ok) throw new Error(optData.error || "Optimization Failed");
 
-                // --- 🛑 CRITICAL FIX FOR "UNDEFINED LENGTH" ---
-                // We must check if the API returned an error BEFORE reading .top_3
-                if (!req.ok || data.error) {
-                    throw new Error(data.error || "Unknown API Error");
-                }
-
-                // Step E: Display Results
-                let output = `⚡ BEST MATCHES (Viewer Time: ${viewerZoneID}):\n\n`;
+                // 3. RENDER
+                let output = `⚡ BEST MATCHES (Viewer: ${viewerZone}):\n\n`;
                 
-                // Safely default to [] if top_3 is missing
-                const results = data.top_3 || [];
-
-                if (results.length === 0) {
-                    output += "⚠️ No viable times found (Everything is Red/Impossible).\n";
+                if (optData.top_3.length === 0) {
+                    output += "⚠️ No viable times found.\n";
                 }
 
-                results.forEach((slot, i) => {
-                    output += `#${i+1} [ ${slot.display_time} ]  Score: ${slot.score}\n`;
-                    if(slot.blockers && slot.blockers.length > 0) {
+                optData.top_3.forEach((slot, i) => {
+                    output += `#${i+1} [ ${slot.display_time} ] Score: ${slot.score}\n`;
+                    if(slot.blockers && slot.blockers.length) {
                         slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
                     } else {
                         output += `   ✨ Perfect Match\n`;
                     }
                     output += `\n`;
                 });
-
-                output += `--------------------------------\n`;
-                output += `RAW RESPONSE:\n` + JSON.stringify(data, null, 2);
 
                 resBox.innerText = output;
                 resBox.style.display = 'block';
@@ -179,7 +133,7 @@
                 resBox.style.display = 'block';
                 resBox.style.color = '#f87171';
             } finally {
-                btn.innerText = "Resolve Cities & Run";
+                btn.innerText = "Find Best Times";
                 btn.disabled = false;
             }
         }
