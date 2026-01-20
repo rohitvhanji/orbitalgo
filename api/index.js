@@ -1,157 +1,128 @@
-// api/index.js
 const express = require('express');
 const cors = require('cors');
-
-// Initialize Express
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// --- CONFIGURATION ---
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
+
+// --- UPDATED CONFIGURATION ---
 const INTERNAL_POINTS = { PERFECT: 100, OKAY: 70, STRETCH: 40, PAINFUL: 10, IMPOSSIBLE: -100 };
+// Misery Units: Used for the Penalty calculation
+const MISERY_UNITS = { "Perfect": 0, "Lunch": 1, "Shoulder": 2, "Stretch": 5, "Painful": 10, "Sleeping": 50 };
+
+// Meeting Scenarios mapping to Weight and Host Policy
+const SCENARIOS = {
+    "peer_sync": { hostStrict: false, weight: 12 },    // The Compromiser
+    "client_meeting": { hostStrict: true, weight: 12 }, // The Executive
+    "all_hands": { hostStrict: false, weight: 7 },     // Majority Rules
+    "urgent_briefing": { hostStrict: true, weight: 7 },  // Host First
+    "culture_chat": { hostStrict: false, weight: 18 },  // People First
+    "gold_standard": { hostStrict: true, weight: 18 }   // High Standards
+};
+
 const HOURS = { WORK_START: 9, WORK_END: 17.5, LUNCH_START: 12, LUNCH_END: 13.5, SHOULDER_START: 8, SHOULDER_END: 18, STRETCH_START: 7, STRETCH_END: 20, PAIN_START: 6, PAIN_END: 22 };
 
-// --- LOGIC HELPERS ---
-function getOffsetInHours(timeZone, dateStr)
-{
-    try
-    {
+function getOffsetInHours(timeZone, dateStr) {
+    try {
         const date = new Date(dateStr + "T12:00:00Z");
         const format = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" });
         const parts = format.formatToParts(date);
         const val = parts.find(p => p.type === "timeZoneName").value.replace("GMT", "").replace("UTC", "");
-        if (!val) return 0;
         const [h, m] = val.split(":").map(Number);
         return h + (h < 0 ? -(m / 60 || 0) : (m / 60 || 0));
     } catch (e) { return null; }
 }
 
-// UPDATE: Accepts hostOffset to check Host availability first
-function calculateSlotScore(utc, locations, hostOffset, viewerZone)
-{
-    // --- 1. STRICT HOST CHECK ---
+function calculateSlotScore(utc, locations, hostOffset, viewerZone, config) {
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDate.getUTCDay();
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
+    const displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
 
-    let displayTime = "Invalid";
-    try {
-        displayTime = new Intl.DateTimeFormat("en-US", { timeZone: viewerZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(utc));
-    } catch (e) { displayTime = "Invalid Zone"; }
-
-    // RULE: Host cannot meet on Weekends or outside 9:00 - 17:30
-    if (hostDay === 0 || hostDay === 6) {
-        return { utc, display_time: displayTime, score: -999, status: "red", blockers: ["Host: Weekend"] };
+    // --- 1. HOST POLICY CHECK ---
+    if (hostDay === 0 || hostDay === 6) return { status: "red", blockers: ["Weekend"] };
+    
+    if (config.hostStrict) {
+        if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) 
+            return { status: "red", blockers: ["Host: Strict 9-5 Constraint"] };
+    } else {
+        if (hostTime < HOURS.PAIN_START || hostTime >= HOURS.PAIN_END) 
+            return { status: "red", blockers: ["Host: Outside Flexible Range"] };
     }
-    if (hostTime < HOURS.WORK_START || hostTime >= HOURS.WORK_END) {
-        return { utc, display_time: displayTime, score: -999, status: "red", blockers: ["Host: Outside Work Hours"] };
-    }
 
-    // --- 2. TEAM SCORING ---
-    let totalScore = 0, maxScore = 0, blockers = [], hasDealbreaker = false;
+    // --- 2. TEAM SCORING (HAPPINESS vs MISERY) ---
+    let totalHappiness = 0;
+    let totalMisery = 0;
+    let blockers = [];
+    let hasDealbreaker = false;
 
-    for (const loc of locations)
-    {
+    for (const loc of locations) {
         const localDate = new Date(utc + (loc.offsetVal * 3600000));
-        const day = localDate.getUTCDay();
-        const timeValue = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
-        let points = 0, note = "";
+        const time = localDate.getUTCHours() + (localDate.getUTCMinutes() / 60);
+        let points = 0, misery = 0, label = "";
 
-        if (day === 0 || day === 6) { points = INTERNAL_POINTS.IMPOSSIBLE; note = "Weekend"; hasDealbreaker = true; }
-        else
-        {
-            if (timeValue >= HOURS.WORK_START && timeValue < HOURS.WORK_END) points = (timeValue >= HOURS.LUNCH_START && timeValue < HOURS.LUNCH_END) ? INTERNAL_POINTS.OKAY : INTERNAL_POINTS.PERFECT;
-            else if ((timeValue >= HOURS.SHOULDER_START && timeValue < HOURS.WORK_START) || (timeValue >= HOURS.WORK_END && timeValue < HOURS.SHOULDER_END)) points = INTERNAL_POINTS.OKAY;
-            else if ((timeValue >= HOURS.STRETCH_START && timeValue < HOURS.SHOULDER_START) || (timeValue >= HOURS.SHOULDER_END && timeValue < HOURS.STRETCH_END)) { points = INTERNAL_POINTS.STRETCH; note = "Hard"; }
-            else if ((timeValue >= HOURS.PAIN_START && timeValue < HOURS.STRETCH_START) || (timeValue >= HOURS.STRETCH_END && timeValue < HOURS.PAIN_END)) { points = INTERNAL_POINTS.PAINFUL; note = "Painful"; }
-            else { points = INTERNAL_POINTS.IMPOSSIBLE; note = "Sleeping"; hasDealbreaker = true; }
+        if (localDate.getUTCDay() === 0 || localDate.getUTCDay() === 6) { 
+            points = INTERNAL_POINTS.IMPOSSIBLE; misery = MISERY_UNITS.Sleeping; hasDealbreaker = true; 
+        } else {
+            if (time >= HOURS.WORK_START && time < HOURS.WORK_END) {
+                if (time >= HOURS.LUNCH_START && time < HOURS.LUNCH_END) { points = INTERNAL_POINTS.OKAY; misery = MISERY_UNITS.Lunch; label = "Lunch"; }
+                else { points = INTERNAL_POINTS.PERFECT; misery = MISERY_UNITS.Perfect; }
+            }
+            else if (time >= HOURS.SHOULDER_START && time < HOURS.SHOULDER_END) { points = INTERNAL_POINTS.OKAY; misery = MISERY_UNITS.Shoulder; label = "Shoulder"; }
+            else if (time >= HOURS.STRETCH_START && time < HOURS.STRETCH_END) { points = INTERNAL_POINTS.STRETCH; misery = MISERY_UNITS.Stretch; label = "Stretch"; }
+            else if (time >= HOURS.PAIN_START && time < HOURS.PAIN_END) { points = INTERNAL_POINTS.PAINFUL; misery = MISERY_UNITS.Painful; label = "Pain"; }
+            else { points = INTERNAL_POINTS.IMPOSSIBLE; misery = MISERY_UNITS.Sleeping; label = "Sleep"; hasDealbreaker = true; }
         }
-        totalScore += points; maxScore += INTERNAL_POINTS.PERFECT;
-        if (note) blockers.push(`${loc.timezone}: ${note}`);
+
+        totalHappiness += points;
+        totalMisery += misery;
+        if (label) blockers.push(`${loc.timezone}: ${label}`);
     }
 
-    const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
+    // --- 3. THE WEIGHTED CALCULATION ---
+    const penalty = totalMisery * config.weight;
+    const finalScore = totalHappiness - penalty;
 
-    return { utc, display_time: displayTime, score: totalScore, status, blockers };
+    return { 
+        utc, 
+        display_time: displayTime, 
+        score: finalScore, 
+        penalty: penalty,
+        status: hasDealbreaker ? "red" : (finalScore > 50 ? "green" : "yellow"), 
+        blockers 
+    };
 }
 
-// --- ROUTES ---
-
-// 1. Health Check
-app.get('/api/health', (req, res) =>
-{
-    res.json({ status: "Orbit Engine Online", env: process.env.VERCEL ? "Vercel" : "Standard Server" });
-});
-
-// 2. Resolve API
-app.post('/api/resolve', async (req, res) =>
-{
-    const { city } = req.body;
-    if (!city) return res.status(400).json({ error: "Missing city" });
-    try
-    {
-        const gRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}`, { headers: { 'User-Agent': 'Orbit/1.0' } });
-        const gData = await gRes.json();
-        if (!gData.length) return res.status(404).json({ error: "City not found" });
-
-        const tRes = await fetch(`https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${gData[0].lat}&lng=${gData[0].lon}`);
-        const tData = await tRes.json();
-
-        res.json({ status: "OK", timezone_id: tData.zoneName, resolved_name: gData[0].display_name });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// 3. Optimize API
-app.post('/api/optimize', (req, res) =>
-{
-    const { date, timezones, optimize_for, host_timezone } = req.body;
-    if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
-
-    // Determine Host (Gatekeeper) & Viewer (Display)
-    const hostZone = host_timezone || optimize_for || "UTC";
-    const viewerZone = optimize_for || "UTC";
-
-    // Pre-calculate Host Offset
-    const hostOffset = getOffsetInHours(hostZone, date);
-    if (hostOffset === null) return res.status(400).json({ error: "Invalid Host Timezone" });
-
-    const locations = [], errors = [];
-    for (const tz of timezones)
-    {
-        const off = getOffsetInHours(tz, date);
-        if (off === null) errors.push(tz);
-        else locations.push({ timezone: tz, offsetVal: off });
-    }
-    if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
-
+app.post('/api/optimize', (req, res) => {
+    const { date, timezones, host_timezone, scenario } = req.body;
+    const config = SCENARIOS[scenario] || SCENARIOS.peer_sync;
+    const hostOffset = getOffsetInHours(host_timezone, date);
+    
+    const locations = timezones.map(tz => ({ timezone: tz, offsetVal: getOffsetInHours(tz, date) }));
     const results = [];
     const startUTC = new Date(date + "T00:00:00Z").getTime();
     
-    // UPDATE: Loop 24 times (1 hour intervals)
     for (let i = 0; i < 24; i++) {
-        const slotUTC = startUTC + (i * 60 * 60000); // 60 mins
-        results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone));
+        results.push(calculateSlotScore(startUTC + (i * 3600000), locations, hostOffset, host_timezone, config));
     }
 
     res.json({ 
-        host: hostZone,
-        viewer: viewerZone,
-        top_3: results.sort((a, b) => b.score - a.score).filter(r => r.status !== 'red').slice(0, 3), 
+        top_3: results.filter(r => r.status !== 'red').sort((a, b) => b.score - a.score).slice(0, 3),
         all_slots: results 
     });
 });
 
+app.post('/api/resolve', async (req, res) => {
+    const { city } = req.body;
+    try {
+        const gRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${city}`);
+        const gData = await gRes.json();
+        const tRes = await fetch(`https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${gData[0].lat}&lng=${gData[0].lon}`);
+        const tData = await tRes.json();
+        res.json({ status: "OK", timezone_id: tData.zoneName, resolved_name: gData[0].display_name });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-// --- SERVER STARTUP ---
-// If running directly (node api/index.js), listen on port 3000
-if (require.main === module)
-{
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => console.log(`🚀 Orbit Server running on http://localhost:${PORT}`));
-}
-
-// Export for Vercel Serverless
-module.exports = app;
+app.listen(3000);
