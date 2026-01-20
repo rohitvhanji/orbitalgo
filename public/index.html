@@ -5,72 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Orbit | Intelligent Meeting Scheduler</title>
     <style>
-        :root {
-            --primary: #2563eb;
-            --bg: #f8fafc;
-            --card: #ffffff;
-            --text: #1e293b;
-            --border: #e2e8f0;
-            --success: #10b981;
-            --error: #ef4444;
-        }
-
-        body { 
-            font-family: -apple-system, system-ui, sans-serif; 
-            max-width: 650px; margin: 40px auto; padding: 20px; 
-            background: var(--bg); color: var(--text); line-height: 1.5;
-        }
-
-        .card { 
-            background: var(--card); padding: 30px; border-radius: 16px; 
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid var(--border);
-        }
-
-        .badge { 
-            display: inline-block; padding: 4px 12px; background: #dbeafe; 
-            color: #1e40af; border-radius: 20px; font-size: 0.7rem; 
-            font-weight: 800; text-transform: uppercase; margin-bottom: 16px;
-        }
-
+        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --text: #1e293b; --border: #e2e8f0; --success: #10b981; --error: #ef4444; }
+        body { font-family: -apple-system, system-ui, sans-serif; max-width: 650px; margin: 40px auto; padding: 20px; background: var(--bg); color: var(--text); line-height: 1.5; }
+        .card { background: var(--card); padding: 30px; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid var(--border); }
+        .badge { display: inline-block; padding: 4px 12px; background: #dbeafe; color: #1e40af; border-radius: 20px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; margin-bottom: 16px; }
         h1 { font-size: 1.5rem; margin: 0 0 20px 0; }
-
         label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; color: #64748b; }
-
-        input, textarea, select { 
-            width: 100%; padding: 12px; border: 1px solid var(--border); 
-            border-radius: 8px; font-size: 1rem; box-sizing: border-box;
-            margin-bottom: 20px; transition: border-color 0.2s;
-        }
-
-        input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); }
-
+        input, textarea, select { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; box-sizing: border-box; margin-bottom: 20px; }
         .row { display: flex; gap: 15px; }
         .col { flex: 1; }
-
-        button { 
-            background: #0f172a; color: white; width: 100%; padding: 16px; 
-            border: none; border-radius: 8px; font-weight: 700; font-size: 1rem;
-            cursor: pointer; transition: opacity 0.2s;
-        }
-
-        button:hover { opacity: 0.9; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        #results { 
-            margin-top: 25px; display: none; padding-top: 20px;
-            border-top: 2px dashed var(--border);
-        }
-
-        .slot { 
-            background: #0f172a; color: #f8fafc; padding: 18px; 
-            border-radius: 12px; margin-bottom: 12px; font-family: monospace;
-            border-left: 4px solid var(--success);
-        }
-
-        .meta { color: #94a3b8; font-size: 0.8rem; display: block; margin-top: 4px; }
-        .blocker { color: #fb7185; display: block; font-size: 0.85rem; margin-top: 8px; }
-        
-        .loading-text { font-style: italic; color: var(--primary); text-align: center; display: block; padding: 20px; }
+        button { background: #0f172a; color: white; width: 100%; padding: 16px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
+        button:disabled { opacity: 0.5; }
+        #results { margin-top: 25px; display: none; padding-top: 20px; border-top: 2px dashed var(--border); }
+        .slot { background: #0f172a; color: #f8fafc; padding: 18px; border-radius: 12px; margin-bottom: 12px; font-family: monospace; border-left: 4px solid var(--success); }
+        .meta { color: #94a3b8; font-size: 0.8rem; display: block; }
+        .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; border-top: 1px solid #334155; padding-top: 10px; }
+        .loading { font-style: italic; color: var(--primary); text-align: center; display: block; padding: 10px; }
     </style>
 </head>
 <body>
@@ -79,7 +29,7 @@
     <div class="badge">Orbit Engine v2.5</div>
     <h1>Global Meeting Optimizer</h1>
 
-    <label>Meeting Context (Algorithm Personality)</label>
+    <label>Meeting Context</label>
     <select id="scenario">
         <option value="peer_sync">Internal Peer Sync (Fairness + Trust)</option>
         <option value="client_meeting">External Client Meeting (Professional Boundaries)</option>
@@ -95,108 +45,66 @@
             <input type="date" id="date">
         </div>
         <div class="col">
-            <label>Your City (Host)</label>
-            <input type="text" id="host" value="New York" placeholder="e.g. San Francisco">
+            <label>Host City</label>
+            <input type="text" id="host" value="New York">
         </div>
     </div>
 
-    <label>Team Member Cities</label>
-    <textarea id="team" rows="3" placeholder="Enter cities separated by commas...">London, Tokyo, Bengaluru</textarea>
-
-    <button onclick="calculate()" id="calcBtn">Find Least Painful Times</button>
-
+    <label>Team Cities</label>
+    <textarea id="team" rows="2">London, Tokyo, Bengaluru</textarea>
+    <button onclick="calculate()" id="btn">Find Least Painful Times</button>
     <div id="results"></div>
 </div>
 
 <script>
-    // Set today's date as default
     document.getElementById('date').valueAsDate = new Date();
+    const API = "http://localhost:3000/api";
 
     async function calculate() {
         const resDiv = document.getElementById('results');
-        const btn = document.getElementById('calcBtn');
-        
-        // UI Reset
-        resDiv.innerHTML = "<span class='loading-text'>Calculating human pain scores...</span>";
+        const btn = document.getElementById('btn');
+        resDiv.innerHTML = "<span class='loading'>Analyzing global timezones...</span>";
         resDiv.style.display = "block";
         btn.disabled = true;
 
         try {
-            // 1. Resolve Host Timezone
-            const hostVal = document.getElementById('host').value.trim();
-            const hRes = await fetch('/api/resolve', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ city: hostVal }) 
-            });
+            const hRes = await fetch(`${API}/resolve`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: document.getElementById('host').value }) });
             const hData = await hRes.json();
-            if (!hData.timezone_id) throw new Error(`Could not find host city: ${hostVal}`);
-
-            // 2. Resolve Team Timezones
-            const cities = document.getElementById('team').value.split(',').map(c => c.trim()).filter(c => c);
-            const teamIDs = [hData.timezone_id]; // Add host to the list
             
-            for (let c of cities) {
-                const r = await fetch('/api/resolve', { 
-                    method: 'POST', 
-                    headers: {'Content-Type': 'application/json'}, 
-                    body: JSON.stringify({ city: c }) 
-                });
+            const teamCities = document.getElementById('team').value.split(',').map(c => c.trim()).filter(c => c);
+            const teamIDs = [hData.timezone_id];
+            for (let c of teamCities) {
+                const r = await fetch(`${API}/resolve`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ city: c }) });
                 const d = await r.json();
-                if (d.timezone_id) teamIDs.push(d.timezone_id);
+                if(d.timezone_id) teamIDs.push(d.timezone_id);
             }
 
-            // 3. Run Optimization
-            const oRes = await fetch('/api/optimize', {
+            const oRes = await fetch(`${API}/optimize`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     date: document.getElementById('date').value,
-                    timezones: [...new Set(teamIDs)], // Deduplicate
+                    timezones: [...new Set(teamIDs)],
                     optimize_for: hData.timezone_id,
                     scenario: document.getElementById('scenario').value
                 })
             });
             const data = await oRes.json();
 
-            // 4. Render Results
             let html = "<b>TOP 3 RECOMMENDATIONS:</b><br><br>";
-            
-            if (!data.top_3 || data.top_3.length === 0) {
-                html += "<div style='color:var(--error)'>No valid slots found. The current policy is too strict for these timezones. Try a 'Flexible' scenario.</div>";
-            } else {
-                data.top_3.forEach((s, i) => {
-                    html += `
-                        <div class="slot">
-                            <b>#${i+1} ${s.display_time}</b>
-                            <span class="meta">Fairness Score: ${Math.round(s.fairness_score)} | Pain Tax: -${s.conflict_penalty}</span>
-                    `;
-                    
-                    if (s.blockers && s.blockers.length > 0) {
-                        s.blockers.forEach(b => {
-                            html += `<span class="blocker">⚠️ ${b}</span>`;
-                        });
-                    } else {
-                        html += `<span class="meta" style="color:var(--success)">✨ Perfect team alignment</span>`;
-                    }
-                    
-                    html += `</div>`;
+            data.top_3.forEach((s, i) => {
+                html += `<div class="slot"><b>#${i+1} ${s.display_time}</b><span class="meta">Fairness Score: ${Math.round(s.fairness_score)} | Tax: -${s.conflict_penalty}</span>`;
+                html += `<div class="breakdown-grid">`;
+                s.breakdown.forEach(loc => {
+                    const dot = loc.score >= 100 ? '🟢' : (loc.score >= 65 ? '🟡' : '🔴');
+                    html += `<div style="font-size:0.75rem">${dot} ${loc.zone.split('/').pop()}: ${loc.local_time}</div>`;
                 });
-            }
+                html += `</div></div>`;
+            });
             resDiv.innerHTML = html;
-
-        } catch (err) {
-            console.error(err);
-            resDiv.innerHTML = `
-                <div style="background:#fee2e2; color:var(--error); padding:15px; border-radius:8px;">
-                    <b>Calculation Failed:</b> ${err.message}<br>
-                    <small>Ensure your backend server is running and the API key is valid.</small>
-                </div>`;
-        } finally {
-            btn.disabled = false;
-        }
+        } catch (e) { resDiv.innerHTML = "<b style='color:red'>Error:</b> Server offline or API limit hit."; }
+        finally { btn.disabled = false; }
     }
 </script>
-
 </body>
 </html>
