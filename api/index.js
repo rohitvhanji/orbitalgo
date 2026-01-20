@@ -32,17 +32,13 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     let blockers = [];
     let hasDealbreaker = false;
 
-    // --- 1. HOST CHECK (Soft Gatekeeper) ---
-    // We check the Host. If they are offline, we mark 'hasDealbreaker = true' (RED status)
-    // BUT we continue to score the rest of the team.
-    
+    // --- 1. HOST CHECK ---
     const hostDate = new Date(utc + (hostOffset * 3600000));
     const hostDay = hostDate.getUTCDay();
     const hostTime = hostDate.getUTCHours() + (hostDate.getUTCMinutes() / 60);
 
-    // Format Host Time for the warning message
     const hostTimeStr = new Intl.DateTimeFormat("en-US", { 
-        timeZone: "UTC", // Already shifted manually, so we treat as UTC
+        timeZone: "UTC", 
         hour: 'numeric', minute: '2-digit', hour12: true 
     }).format(hostDate);
 
@@ -82,7 +78,6 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
     }
 
     // --- 3. FINAL STATUS ---
-    // If Host is offline, status is RED, but score remains high so you can see potential.
     const status = (hasDealbreaker || maxScore === 0) ? "red" : ((totalScore / maxScore) * 100 >= 80 ? "green" : "yellow");
 
     let displayTime = "Invalid";
@@ -95,12 +90,10 @@ function calculateSlotScore(utc, locations, hostOffset, viewerZone) {
 
 // --- ROUTES ---
 
-// Health Check
 app.get('/api/health', (req, res) => {
     res.json({ status: "Orbit Engine Online", env: process.env.VERCEL ? "Vercel" : "Standard Server" });
 });
 
-// Resolve API
 app.post('/api/resolve', async (req, res) => {
     const { city } = req.body;
     if (!city) return res.status(400).json({ error: "Missing city" });
@@ -116,12 +109,11 @@ app.post('/api/resolve', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Optimize API
 app.post('/api/optimize', (req, res) => {
     const { date, timezones, optimize_for, host_timezone } = req.body;
     if (!date || !timezones) return res.status(400).json({ error: "Missing inputs" });
 
-    // 1. Determine Roles
+    // 1. Roles
     const hostZone = host_timezone || optimize_for || "UTC";
     const viewerZone = optimize_for || "UTC";
 
@@ -129,7 +121,7 @@ app.post('/api/optimize', (req, res) => {
     const hostOffset = getOffsetInHours(hostZone, date);
     if (hostOffset === null) return res.status(400).json({ error: "Invalid Host Timezone" });
 
-    // 3. Prepare Team Locations
+    // 3. Team
     const locations = [], errors = [];
     for (const tz of timezones) {
         const off = getOffsetInHours(tz, date);
@@ -138,10 +130,15 @@ app.post('/api/optimize', (req, res) => {
     }
     if (errors.length) return res.status(400).json({ error: "Invalid Timezones", invalid_ids: errors });
 
-    // 4. Run Loop (24 Hours)
-    const results = [];
-    const startUTC = new Date(date + "T00:00:00Z").getTime();
+    // 4. RUN LOOP (24 Hours)
+    // FIX: We align the start time to the HOST'S MIDNIGHT, not UTC Midnight.
+    // Logic: UTC_Midnight - HostOffset = Host_Midnight
+    // Example: 00:00 UTC - (-5 hours NY) = 05:00 UTC (Which is 00:00 NY)
     
+    const utcMidnight = new Date(date + "T00:00:00Z").getTime();
+    const startUTC = utcMidnight - (hostOffset * 3600000); 
+    
+    const results = [];
     for (let i = 0; i < 24; i++) {
         const slotUTC = startUTC + (i * 60 * 60000); // 60 min intervals
         results.push(calculateSlotScore(slotUTC, locations, hostOffset, viewerZone));
@@ -150,13 +147,11 @@ app.post('/api/optimize', (req, res) => {
     res.json({ 
         host: hostZone,
         viewer: viewerZone,
-        // We show top 3 valid ones, but frontend can look at 'all_slots' if everything is red
         top_3: results.sort((a, b) => b.score - a.score).filter(r => r.status !== 'red').slice(0, 3), 
         all_slots: results 
     });
 });
 
-// Server Startup
 if (require.main === module) {
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => console.log(`🚀 Orbit Server running on http://localhost:${PORT}`));
