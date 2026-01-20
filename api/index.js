@@ -1,7 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
-app.use(cors());
+
+// Robust CORS to allow local file testing
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST']
+}));
 app.use(express.json());
 
 const TIMEZONEDB_KEY = 'VW4CCUCGOI2M'; 
@@ -18,6 +23,11 @@ const SCENARIOS = {
     "culture_chat": { hostMode: 'flexible', weight: 18 },
     "gold_standard": { hostMode: 'strict', weight: 18 }
 };
+
+// Simple route to check if server is alive
+app.get('/api/health', (req, res) => {
+    res.json({ status: "Online", time: new Date().toISOString() });
+});
 
 function getOffsetInHours(timeZone, dateStr) {
     try {
@@ -63,7 +73,6 @@ function calculateSlot(utc, locations, hostOffset, viewerZone, config) {
         miseryIndex += (MISERY[r] || 0);
         if (p < POINTS.PERFECT) blockers.push(`${loc.timezone}: ${r}`);
 
-        // Track breakdown for UI
         breakdown.push({
             zone: loc.timezone,
             local_time: new Intl.DateTimeFormat("en-US", { timeZone: "UTC", hour: 'numeric', minute: '2-digit', hour12: true }).format(localDate),
@@ -107,10 +116,16 @@ app.post('/api/resolve', async (req, res) => {
         const { city } = req.body;
         const gRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${city}`);
         const gData = await gRes.json();
+        if (!gData.length) return res.status(404).json({ error: "City not found" });
+        
         const tRes = await fetch(`https://api.timezonedb.com/v2.1/get-time-zone?key=${TIMEZONEDB_KEY}&format=json&by=position&lat=${gData[0].lat}&lng=${gData[0].lon}`);
         const tData = await tRes.json();
         res.json({ timezone_id: tData.zoneName });
-    } catch(e) { res.status(500).json({ error: "Location error" }); }
+    } catch(e) { res.status(500).json({ error: "Location resolution failed" }); }
 });
 
-app.listen(3000, () => console.log('🚀 Orbit Engine Ready on Port 3000'));
+const PORT = 3000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Orbit Engine Ready!`);
+    console.log(`Endpoint: http://localhost:${PORT}`);
+});
