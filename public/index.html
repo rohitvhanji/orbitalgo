@@ -31,10 +31,10 @@
 <body>
 
     <div class="card">
-        <span class="tag">DECOUPLED ARCHITECTURE</span>
+        <span class="tag">STANDARD VERSION</span>
         <h1>Orbit Intelligence Engine</h1>
         <p style="color:#71717a; font-size:0.9rem; margin-bottom:20px;">
-            Frontend handles City Names. Backend only knows Timezones.
+            Strict 9-5 Host Gatekeeper. 1-hour slots.
         </p>
         
         <label>Target Date</label>
@@ -90,12 +90,7 @@
                 const hostCity = document.getElementById('hostInput').value.trim();
                 const viewerCity = document.getElementById('viewerInput').value.trim();
 
-                // 1. FRONTEND DICTIONARY (Memory)
-                // We use this to map Timezone IDs back to User City Names
-                const cityMap = new Map(); // e.g., "Asia/Tokyo" -> "Tokyo"
-
-                // Helper: Resolve & Store in Map
-                const resolveAndMap = async (name, label) => {
+                const resolveCity = async (name, label) => {
                     try {
                         const res = await fetch('/api/resolve', {
                             method: 'POST',
@@ -104,11 +99,7 @@
                         });
                         const data = await res.json();
                         if (res.ok) {
-                            log.innerHTML += `<div class="log-ok">✓ ${label}: ${data.resolved_name} (${data.timezone_id})</div>`;
-                            
-                            // STORE MAPPING IN FRONTEND MEMORY
-                            cityMap.set(data.timezone_id, name);
-                            
+                            log.innerHTML += `<div class="log-ok">✓ ${label}: ${data.timezone_id}</div>`;
                             return data.timezone_id;
                         } else {
                             throw new Error(data.error);
@@ -119,25 +110,23 @@
                     }
                 };
 
-                // 2. Resolve Host & Viewer
-                const hostID = await resolveAndMap(hostCity, "Host");
-                const viewerID = await resolveAndMap(viewerCity, "Viewer");
+                // 1. Resolve Host & Viewer
+                const hostID = await resolveCity(hostCity, "Host");
+                const viewerID = await resolveCity(viewerCity, "Viewer");
 
-                // 3. Resolve Team
+                // 2. Resolve Team
                 const teamIDs = [];
                 for (const city of cities) {
                     try {
-                        const id = await resolveAndMap(city, "Team");
+                        const id = await resolveCity(city, "Team");
                         teamIDs.push(id);
                     } catch(e) {}
                 }
 
-                // Add Host to team list if needed
                 if (!teamIDs.includes(hostID)) teamIDs.push(hostID);
-
                 if (teamIDs.length === 0) throw new Error("No valid locations found.");
 
-                // 4. CALL OPTIMIZE (Send ONLY IDs)
+                // 3. Call Optimize
                 btn.innerText = "Calculating Schedule...";
                 
                 const optRes = await fetch('/api/optimize', {
@@ -154,9 +143,9 @@
                 const optData = await optRes.json();
                 if (!optRes.ok) throw new Error(optData.error || "Optimization Failed");
 
-                // 5. RENDER (Re-Hydrate Names)
-                let output = `⚡ BEST MATCHES (Viewer: ${cityMap.get(viewerID) || viewerID}):\n`;
-                output += `   Host: ${cityMap.get(hostID) || hostID}\n\n`;
+                // 4. Render
+                let output = `⚡ BEST MATCHES (Viewer: ${viewerID}):\n`;
+                output += `   Host: ${hostID}\n\n`;
                 
                 if (optData.top_3.length === 0) {
                     output += "⚠️ No viable times found where Host is available.\n";
@@ -164,16 +153,8 @@
 
                 optData.top_3.forEach((slot, i) => {
                     output += `#${i+1} [ ${slot.display_time} ] Score: ${slot.score}\n`;
-                    
-                    // RE-HYDRATE BLOCKERS
-                    // Backend sends "Asia/Tokyo: Sleeping". We want "Tokyo: Sleeping"
                     if(slot.blockers && slot.blockers.length) {
-                        slot.blockers.forEach(b => {
-                            // b is like "Asia/Tokyo: Sleeping"
-                            const [id, reason] = b.split(': ');
-                            const friendName = cityMap.get(id) || id; // Lookup Name
-                            output += `   ⚠️ ${friendName}: ${reason}\n`;
-                        });
+                        slot.blockers.forEach(b => output += `   ⚠️ ${b}\n`);
                     } else {
                         output += `   ✨ Perfect Match\n`;
                     }
